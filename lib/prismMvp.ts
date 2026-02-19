@@ -8,6 +8,7 @@ export type Step1Exposure = "internal" | "limited_external" | "public";
 export type Step1Reversibility = "easy" | "limited" | "irreversible";
 export type Step1Impact = "low" | "medium" | "high";
 export type Step1Hitl = "pre_review" | "post_monitoring" | "none";
+export type Step1AiMinRole = "draft_only" | "auto_publish";
 
 export type Step1Data = {
   why: string;
@@ -15,6 +16,7 @@ export type Step1Data = {
   target_detail: string;
   as_is: string;
   result_state: Step1ResultState | "";
+  ai_min_role: Step1AiMinRole | "";
   kpi: string;
   no_ai_alternative: Step1NoAiAlternative[];
   no_ai_alternative_detail: string;
@@ -212,6 +214,7 @@ const step1Schema = z.object({
   target_detail: z.string(),
   as_is: z.string(),
   result_state: z.enum(["draft", "status_change", "external_publish", "internal_reference", ""]),
+  ai_min_role: z.enum(["draft_only", "auto_publish", ""]),
   kpi: z.string(),
   no_ai_alternative: z.array(z.enum(["manual", "template", "rule_based", "search_based", "other"])),
   no_ai_alternative_detail: z.string(),
@@ -366,6 +369,10 @@ function asStep1Impact(value: unknown): Step1Impact | undefined {
 
 function asStep1Hitl(value: unknown): Step1Hitl | undefined {
   return value === "pre_review" || value === "post_monitoring" || value === "none" ? value : undefined;
+}
+
+function asStep1AiMinRole(value: unknown): Step1AiMinRole | undefined {
+  return value === "draft_only" || value === "auto_publish" ? value : undefined;
 }
 
 function asStringArray(value: unknown): string[] | undefined {
@@ -536,6 +543,7 @@ function parseStep1(value: unknown): Partial<Step1Data> {
     target_detail: asString(value.target_detail) ?? "",
     as_is: asString(value.as_is) ?? asString(value.as_is_problem),
     result_state: asStep1ResultState(value.result_state) ?? (legacyResultArtifact?.trim() ? "draft" : undefined),
+    ai_min_role: asStep1AiMinRole(value.ai_min_role) ?? (legacyAiMinRole === "auto_publish" ? "auto_publish" : "draft_only"),
     kpi: asString(value.kpi) ?? asString(value.kpi_hypothesis),
     no_ai_alternative: noAiAlternatives,
     no_ai_alternative_detail: asString(value.no_ai_alternative_detail) ?? "",
@@ -657,6 +665,7 @@ export function getDefaultStep1(): Step1Data {
     target_detail: "",
     as_is: "",
     result_state: "",
+    ai_min_role: "",
     kpi: "",
     no_ai_alternative: [],
     no_ai_alternative_detail: "",
@@ -859,6 +868,7 @@ export function getMissingStep1RequiredFields(step1: Step1Data): string[] {
   if (step1.target.length === 0) missing.push("누구를 위한 기능인가");
   if (!step1.as_is.trim()) missing.push("어떤 문제인가 (AS-IS)");
   if (!step1.result_state) missing.push("끝나면 무엇이 남는가");
+  if (!step1.ai_min_role) missing.push("AI 최소 역할");
   if (!step1.kpi.trim()) missing.push("KPI/지표 가설");
   if (step1.no_ai_alternative.length === 0) missing.push("AI 없이 대안");
   if (!step1.exposure) missing.push("노출 범위");
@@ -927,7 +937,7 @@ export function generateStep2Data(step1: Step1Data): Step2Data {
     user_flow: "프로젝트 생성 -> 입력 작성 -> AI 초안 생성 -> 수정 -> 게시 요청",
     ai_intervention: "입력 완료 시 draft 단계에서 자동 초안 생성",
     system_process: `입력값 검증 -> AI 호출 -> 결과 저장 -> 상태 draft 변경 (실패 시 failed), 정책: ${exposurePolicy}`,
-    human_control: requiresPreReview ? "사전 리뷰(pre_review) 후 게시 가능" : "게시 후 모니터링(post_monitoring) 기반 운영",
+    human_control: `${requiresPreReview ? "사전 리뷰(pre_review) 후 게시 가능" : "게시 후 모니터링(post_monitoring) 기반 운영"} (AI 최소 역할: ${step1.ai_min_role || "draft_only"})`,
     failure_strategy: "AI 실패 시 1회 재시도 -> 실패 시 알림 및 수동 모드 전환 (idempotent 처리)",
     delivery_mode: "화면에 초안 + 상태 배지(draft) 노출, 저장 완료 후 노출",
     data_storage: "post_drafts 저장 + confidence + version 필드",
