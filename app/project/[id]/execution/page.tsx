@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useParams } from "next/navigation";
 import {
@@ -29,6 +29,10 @@ export default function ExecutionPage() {
   const [locked, setLocked] = useState(true);
   const [draft, setDraft] = useState<Step2Data | null>(null);
   const [message, setMessage] = useState("");
+  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "impact">("preview");
+  const [rightPanelWidth, setRightPanelWidth] = useState(360);
+  const [isResizing, setIsResizing] = useState(false);
+  const twoPaneRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -85,6 +89,26 @@ export default function ExecutionPage() {
     setDraft(merged);
     setStep2Data(id, merged);
   }, [id]);
+
+  useEffect(() => {
+    if (!isResizing) return;
+    function onMove(e: MouseEvent) {
+      const rect = twoPaneRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const next = rect.right - e.clientX;
+      const clamped = Math.max(320, Math.min(760, next));
+      setRightPanelWidth(clamped);
+    }
+    function onUp() {
+      setIsResizing(false);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [isResizing]);
 
   function handleSave() {
     if (!id || locked || !draft) return;
@@ -163,7 +187,7 @@ export default function ExecutionPage() {
   const complete = draft ? canCompleteStep2(draft) : false;
 
   return (
-    <div style={twoPaneStyle}>
+    <div ref={twoPaneRef} className="two-pane" style={twoPaneStyle}>
       <section style={mainPanelStyle}>
         <h1 style={titleStyle}>STEP 2 설계 초안</h1>
 
@@ -272,22 +296,85 @@ export default function ExecutionPage() {
         {message && <p style={{ ...subtleStyle, marginTop: 8 }}>{message}</p>}
       </section>
 
-      <aside style={sidePanelStyle}>
+      <div
+        className="pane-resizer"
+        onMouseDown={() => setIsResizing(true)}
+        title="드래그해서 오른쪽 패널 크기 조절"
+        style={resizerStyle}
+      />
+
+      <aside className="right-pane" style={{ ...sidePanelStyle, width: rightPanelWidth }}>
         <h2 style={{ margin: 0, fontSize: 16 }}>우측 패널</h2>
-        <p style={{ ...subtleStyle, marginTop: 8 }}>
-          STEP2 저장(완료 조건 충족) 시 STEP3(정책) 탭이 열립니다.
-        </p>
-        {!locked && missing.length > 0 && (
-          <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
-            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>누락 항목</div>
-            {missing.map((m) => (
-              <div key={m} style={{ ...subtleStyle, fontSize: 12, marginTop: 4 }}>
-                • {m}
+        <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+          <button
+            type="button"
+            onClick={() => setRightPanelTab("preview")}
+            style={{ ...topPanelTabStyle, background: rightPanelTab === "preview" ? "#111827" : "#f3f4f6", color: rightPanelTab === "preview" ? "#fff" : "#374151", borderColor: rightPanelTab === "preview" ? "#111827" : "#d1d5db" }}
+          >
+            Preview
+          </button>
+          <button
+            type="button"
+            onClick={() => setRightPanelTab("impact")}
+            style={{ ...topPanelTabStyle, background: rightPanelTab === "impact" ? "#111827" : "#f3f4f6", color: rightPanelTab === "impact" ? "#fff" : "#374151", borderColor: rightPanelTab === "impact" ? "#111827" : "#d1d5db" }}
+          >
+            영향도맵
+          </button>
+        </div>
+
+        {rightPanelTab === "preview" && (
+          <>
+            <p style={{ ...subtleStyle, marginTop: 8 }}>
+              STEP2 저장(완료 조건 충족) 시 STEP3(정책) 탭이 열립니다.
+            </p>
+            {!locked && missing.length > 0 && (
+              <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>누락 항목</div>
+                {missing.map((m) => (
+                  <div key={m} style={{ ...subtleStyle, fontSize: 12, marginTop: 4 }}>
+                    • {m}
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+          </>
+        )}
+
+        {rightPanelTab === "impact" && (
+          <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, background: "#f8fafc" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>영향도맵</div>
+            <p style={{ ...subtleStyle, marginTop: 6 }}>영향도맵 상세 내용은 다음 단계에서 추가 예정입니다.</p>
           </div>
         )}
       </aside>
+      <style jsx>{`
+        .two-pane {
+          display: flex;
+          align-items: flex-start;
+        }
+        .pane-resizer {
+          width: 10px;
+          cursor: col-resize;
+          align-self: stretch;
+          margin: 0 2px;
+          border-radius: 6px;
+        }
+        .pane-resizer:hover {
+          background: #e5e7eb;
+        }
+        @media (max-width: 1180px) {
+          .two-pane {
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+          }
+          .pane-resizer {
+            display: none;
+          }
+          .right-pane {
+            width: auto !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
@@ -347,7 +434,6 @@ const mainPanelStyle: CSSProperties = {
 
 const sidePanelStyle: CSSProperties = {
   ...panelStyle,
-  width: 320,
   flexShrink: 0,
 };
 
@@ -377,6 +463,20 @@ const buttonStyle: CSSProperties = {
   background: "#fff",
   fontWeight: 700,
   cursor: "pointer",
+};
+
+const topPanelTabStyle: CSSProperties = {
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderRadius: 8,
+  fontSize: 12,
+  fontWeight: 700,
+  padding: "6px 12px",
+  cursor: "pointer",
+};
+
+const resizerStyle: CSSProperties = {
+  background: "transparent",
 };
 
 const lockStyle: CSSProperties = {

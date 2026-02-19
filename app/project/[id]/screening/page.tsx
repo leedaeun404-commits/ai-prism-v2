@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useParams } from "next/navigation";
 import {
@@ -26,6 +26,10 @@ export default function ScreeningPage() {
   const [data, setData] = useState<Step1Data>(getDefaultStep1());
   const [frozen, setFrozen] = useState(false);
   const [message, setMessage] = useState("");
+  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "impact">("preview");
+  const [rightPanelWidth, setRightPanelWidth] = useState(360);
+  const [isResizing, setIsResizing] = useState(false);
+  const twoPaneRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -36,6 +40,26 @@ export default function ScreeningPage() {
   const decision = useMemo(() => getGoStopResult(data), [data]);
   const missingForFreeze = useMemo(() => getMissingStep1RequiredFields(data), [data]);
   const freezeReady = canFreezeStep1(data);
+
+  useEffect(() => {
+    if (!isResizing) return;
+    function onMove(e: MouseEvent) {
+      const rect = twoPaneRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const next = rect.right - e.clientX;
+      const clamped = Math.max(320, Math.min(760, next));
+      setRightPanelWidth(clamped);
+    }
+    function onUp() {
+      setIsResizing(false);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [isResizing]);
 
   function update<K extends keyof Step1Data>(key: K, value: Step1Data[K]) {
     if (frozen) return;
@@ -88,7 +112,7 @@ export default function ScreeningPage() {
   }
 
   return (
-    <div style={twoPaneStyle}>
+    <div ref={twoPaneRef} className="two-pane" style={twoPaneStyle}>
       <section style={mainPanelStyle}>
         <h1 style={titleStyle}>STEP 1 전략&방향</h1>
         <p style={subtleStyle}>입력 고정 후 Freeze해야 다음 단계로 이동할 수 있습니다.</p>
@@ -182,28 +206,91 @@ export default function ScreeningPage() {
         {message && <p style={{ ...subtleStyle, marginTop: 10 }}>{message}</p>}
       </section>
 
-      <aside style={sidePanelStyle}>
+      <div
+        className="pane-resizer"
+        onMouseDown={() => setIsResizing(true)}
+        title="드래그해서 오른쪽 패널 크기 조절"
+        style={resizerStyle}
+      />
+
+      <aside className="right-pane" style={{ ...sidePanelStyle, width: rightPanelWidth }}>
         <h2 style={{ margin: 0, fontSize: 16 }}>우측 패널</h2>
-        <div
-          style={{
-            marginTop: 10,
-            border: "1px solid #e5e7eb",
-            borderRadius: 10,
-            padding: 12,
-            background: decision === "STOP" ? "#fef2f2" : "#f0fdf4",
-          }}
-        >
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>GO / STOP 카드</div>
-          <div style={{ fontSize: 22, fontWeight: 800 }}>{decision}</div>
-          <p style={{ ...subtleStyle, marginTop: 8 }}>
-            룰: risk_level=high & ai_min_role=auto_publish 이면 STOP
-          </p>
+        <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+          <button
+            type="button"
+            onClick={() => setRightPanelTab("preview")}
+            style={{ ...topPanelTabStyle, background: rightPanelTab === "preview" ? "#111827" : "#f3f4f6", color: rightPanelTab === "preview" ? "#fff" : "#374151", borderColor: rightPanelTab === "preview" ? "#111827" : "#d1d5db" }}
+          >
+            Preview
+          </button>
+          <button
+            type="button"
+            onClick={() => setRightPanelTab("impact")}
+            style={{ ...topPanelTabStyle, background: rightPanelTab === "impact" ? "#111827" : "#f3f4f6", color: rightPanelTab === "impact" ? "#fff" : "#374151", borderColor: rightPanelTab === "impact" ? "#111827" : "#d1d5db" }}
+          >
+            영향도맵
+          </button>
         </div>
 
-        <button onClick={handleGenerateStep2Draft} style={{ ...buttonStyle, marginTop: 12, width: "100%" }}>
-          STEP2 초안 생성
-        </button>
+        {rightPanelTab === "preview" && (
+          <>
+            <div
+              style={{
+                marginTop: 10,
+                border: "1px solid #e5e7eb",
+                borderRadius: 10,
+                padding: 12,
+                background: decision === "STOP" ? "#fef2f2" : "#f0fdf4",
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>GO / STOP 카드</div>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>{decision}</div>
+              <p style={{ ...subtleStyle, marginTop: 8 }}>
+                룰: risk_level=high & ai_min_role=auto_publish 이면 STOP
+              </p>
+            </div>
+
+            <button onClick={handleGenerateStep2Draft} style={{ ...buttonStyle, marginTop: 12, width: "100%" }}>
+              STEP2 초안 생성
+            </button>
+          </>
+        )}
+
+        {rightPanelTab === "impact" && (
+          <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, background: "#f8fafc" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>영향도맵</div>
+            <p style={{ ...subtleStyle, marginTop: 6 }}>영향도맵 상세 내용은 다음 단계에서 추가 예정입니다.</p>
+          </div>
+        )}
       </aside>
+      <style jsx>{`
+        .two-pane {
+          display: flex;
+          align-items: flex-start;
+        }
+        .pane-resizer {
+          width: 10px;
+          cursor: col-resize;
+          align-self: stretch;
+          margin: 0 2px;
+          border-radius: 6px;
+        }
+        .pane-resizer:hover {
+          background: #e5e7eb;
+        }
+        @media (max-width: 1180px) {
+          .two-pane {
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+          }
+          .pane-resizer {
+            display: none;
+          }
+          .right-pane {
+            width: auto !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
@@ -254,7 +341,6 @@ const mainPanelStyle: CSSProperties = {
 
 const sidePanelStyle: CSSProperties = {
   ...panelStyle,
-  width: 320,
   flexShrink: 0,
 };
 
@@ -304,4 +390,18 @@ const buttonStyle: CSSProperties = {
   fontWeight: 600,
   color: "#374151",
   cursor: "pointer",
+};
+
+const topPanelTabStyle: CSSProperties = {
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderRadius: 8,
+  fontSize: 12,
+  fontWeight: 700,
+  padding: "6px 12px",
+  cursor: "pointer",
+};
+
+const resizerStyle: CSSProperties = {
+  background: "transparent",
 };

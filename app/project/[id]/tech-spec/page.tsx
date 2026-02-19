@@ -21,6 +21,7 @@ import {
 } from "@/lib/prismMvp";
 
 type DiagramTab = Step4TabKey;
+type RightPanelTab = "preview" | "impact";
 
 const DIAGRAM_TABS: Array<{ key: DiagramTab; label: string }> = [
   { key: "state", label: "State" },
@@ -33,6 +34,11 @@ const DIAGRAM_TABS: Array<{ key: DiagramTab; label: string }> = [
   { key: "rollback", label: "Rollback" },
   { key: "cost", label: "Cost Path" },
   { key: "ia", label: "IA" },
+];
+
+const RIGHT_PANEL_TABS: Array<{ key: RightPanelTab; label: string }> = [
+  { key: "preview", label: "Preview" },
+  { key: "impact", label: "영향도맵" },
 ];
 
 const DIAGRAM_TAB_META: Record<DiagramTab, { label: string; bg: string; fg: string; border: string }> = {
@@ -59,6 +65,7 @@ export default function TechSpecPage() {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [dropPosition, setDropPosition] = useState<"before" | "after">("before");
   const [diagramTab, setDiagramTab] = useState<DiagramTab>("state");
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("preview");
   const [selectedRowId, setSelectedRowId] = useState<Step4RowId | null>(null);
   const [rightPanelWidth, setRightPanelWidth] = useState(420);
   const [isResizing, setIsResizing] = useState(false);
@@ -312,7 +319,14 @@ export default function TechSpecPage() {
   return (
     <div ref={twoPaneRef} className="two-pane" style={twoPaneStyle}>
       <section style={mainPanelStyle}>
-        <h1 style={titleStyle}>STEP 4 기술 스펙</h1>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <h1 style={titleStyle}>STEP 4 기술 스펙</h1>
+          {!locked && (
+            <button style={saveButtonStyle} onClick={handleSave}>
+              저장
+            </button>
+          )}
+        </div>
         <div style={policyMeaningStyle}>
           auto_approved = 초안 내부 저장 승인(배포 아님) · publish 승인 = 외부 반영 승인(휴먼 필수)
         </div>
@@ -325,11 +339,6 @@ export default function TechSpecPage() {
 
         {!locked && (
           <div style={tableWrapStyle}>
-            <div style={{ ...rowStyle, ...headStyle }}>
-              <div style={cellItemStyle}>STEP 4 - 기술 스펙</div>
-              <div style={cellSpecStyle}>STEP 4 ex</div>
-              <div style={cellNoteStyle}>비고</div>
-            </div>
             {rows.map((row, rowIdx) => {
               const linkedTabs = row.relatedTabs;
               const isRelated = linkedTabs.includes(diagramTab);
@@ -347,7 +356,9 @@ export default function TechSpecPage() {
                     borderTop:
                       dropIndex !== null && dropIndex === rowIdx && dropPosition === "before"
                         ? "2px solid #3b82f6"
-                        : rowStyle.borderTop,
+                        : rowIdx === 0
+                          ? "none"
+                          : rowStyle.borderTop,
                     borderBottom:
                       dropIndex !== null && dropIndex === rowIdx && dropPosition === "after"
                         ? "2px solid #3b82f6"
@@ -379,6 +390,7 @@ export default function TechSpecPage() {
                   <button
                     type="button"
                     draggable
+                    className="drag-handle"
                     onDragStart={() => setDragIndex(rowIdx)}
                     onDragEnd={() => {
                       setDragIndex(null);
@@ -387,7 +399,7 @@ export default function TechSpecPage() {
                     title="드래그해서 순서 변경"
                     style={dragHandleStyle}
                   >
-                    ⋮⋮
+                    ≡
                   </button>
                   <div style={{ display: "grid", gap: 6 }}>
                     <div style={{ color: isRelated ? "#0f172a" : undefined }}>{row.title}</div>
@@ -423,14 +435,7 @@ export default function TechSpecPage() {
           </div>
         )}
 
-        {!locked && (
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <button style={saveButtonStyle} onClick={handleSave}>
-              저장
-            </button>
-            {message && <p style={{ ...subtleStyle, margin: 0, alignSelf: "center" }}>{message}</p>}
-          </div>
-        )}
+        {!locked && message && <p style={{ ...subtleStyle, marginTop: 10 }}>{message}</p>}
       </section>
 
       <div
@@ -442,50 +447,51 @@ export default function TechSpecPage() {
 
       <aside className="right-pane" style={{ ...sidePanelStyle, width: rightPanelWidth }}>
         <h2 style={{ margin: 0, fontSize: 16 }}>우측 패널</h2>
-        <p style={{ ...subtleStyle, marginTop: 8 }}>STEP4 편집 내용이 실시간으로 다이어그램에 반영됩니다.</p>
-        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-          {DIAGRAM_TABS.map((tab) => (
+        <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+          {RIGHT_PANEL_TABS.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => setDiagramTab(tab.key)}
-              style={getDiagramTabButtonStyle(tab.key, diagramTab === tab.key)}
+              type="button"
+              onClick={() => setRightPanelTab(tab.key)}
+              style={{
+                ...topPanelTabStyle,
+                background: rightPanelTab === tab.key ? "#111827" : "#f3f4f6",
+                color: rightPanelTab === tab.key ? "#fff" : "#374151",
+                borderColor: rightPanelTab === tab.key ? "#111827" : "#d1d5db",
+              }}
             >
               {tab.label}
             </button>
           ))}
         </div>
-        {selectedRow && (
-          <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
-            <div style={{ fontSize: 12, color: "#6b7280" }}>선택 행</div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", marginTop: 2 }}>{selectedRow.title}</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-              {selectedRow.relatedTabs.map((tab) => {
-                const meta = DIAGRAM_TAB_META[tab];
-                return (
-                  <button
-                    key={`suggest-${selectedRow.rowId}-${tab}`}
-                    type="button"
-                    onClick={() => setDiagramTab(tab)}
-                    style={{
-                      ...tabButtonStyle,
-                      background: tab === diagramTab ? meta.fg : meta.bg,
-                      color: tab === diagramTab ? "#fff" : meta.fg,
-                      borderColor: meta.border,
-                      padding: "3px 8px",
-                      fontSize: 11,
-                    }}
-                  >
-                    추천: {meta.label}
-                  </button>
-                );
-              })}
+
+        {rightPanelTab === "preview" && (
+          <>
+            <p style={{ ...subtleStyle, marginTop: 8 }}>STEP4 편집 내용이 실시간으로 다이어그램에 반영됩니다.</p>
+            <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+              {DIAGRAM_TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setDiagramTab(tab.key)}
+                  style={getDiagramTabButtonStyle(tab.key, diagramTab === tab.key)}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
-          </div>
+            {diagramTab === "sequence" ? (
+              <SequenceDiagramView source={diagramText} />
+            ) : (
+              <FlowchartDiagramView source={diagramText} />
+            )}
+          </>
         )}
-        {diagramTab === "sequence" ? (
-          <SequenceDiagramView source={diagramText} />
-        ) : (
-          <FlowchartDiagramView source={diagramText} />
+
+        {rightPanelTab === "impact" && (
+          <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, background: "#f8fafc" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>영향도맵</div>
+            <p style={{ ...subtleStyle, marginTop: 6 }}>영향도맵 상세 내용은 다음 단계에서 추가 예정입니다.</p>
+          </div>
         )}
       </aside>
       <style jsx>{`
@@ -502,6 +508,12 @@ export default function TechSpecPage() {
         }
         .pane-resizer:hover {
           background: #e5e7eb;
+        }
+        .drag-handle {
+          opacity: 0.45;
+        }
+        .drag-handle:hover {
+          opacity: 0.85;
         }
         @media (max-width: 1180px) {
           .two-pane {
@@ -645,16 +657,22 @@ const saveButtonStyle: CSSProperties = {
 };
 
 const dragHandleStyle: CSSProperties = {
-  border: "1px solid #d1d5db",
-  borderRadius: 6,
-  background: "#f9fafb",
-  color: "#6b7280",
+  border: "none",
+  borderRadius: 0,
+  background: "transparent",
+  color: "#9ca3af",
   cursor: "grab",
-  fontSize: 12,
+  fontSize: 14,
+  fontWeight: 600,
   lineHeight: 1,
-  padding: "6px 4px",
-  marginTop: 1,
+  padding: 0,
+  width: 16,
+  height: 20,
+  display: "grid",
+  placeItems: "center",
+  marginTop: 0,
   flexShrink: 0,
+  alignSelf: "center",
 };
 
 const linkBadgeStyle: CSSProperties = {
@@ -678,6 +696,16 @@ const tabButtonStyle: CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
   padding: "5px 10px",
+  cursor: "pointer",
+};
+
+const topPanelTabStyle: CSSProperties = {
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderRadius: 8,
+  fontSize: 12,
+  fontWeight: 700,
+  padding: "6px 12px",
   cursor: "pointer",
 };
 
