@@ -12,7 +12,7 @@
   - +신규 버튼 동작:
     (1) 빈 기획 생성
     (2) localStorage 저장
-    (3) /item/[id]로 이동
+    (3) /project/[id]로 이동
 */
 
 import { useEffect, useMemo, useState } from "react";
@@ -309,18 +309,18 @@ export default function Home() {
     const stage = normalizeStage(it.stage);
     // Step 1
     if (stage === STAGE1_NEW || stage.startsWith("1.")) {
-      router.push(`/item/${it.id}`);
+      router.push(`/project/${it.id}`);
       return;
     }
 
     // Step 2
     if (stage === STAGE2_NEW || stage.startsWith("2.")) {
   const flow = getOrCreateMainStep2Flow(it.id);
-  router.push(`/item/${it.id}/step2/${flow.id}`);
+  router.push(`/project/${it.id}/screening`);
   return;
 }
     // 나머지는 일단 Step1
-    router.push(`/item/${it.id}`);
+    router.push(`/project/${it.id}`);
   }
   
   /* -------------------------
@@ -397,7 +397,7 @@ function confirmCreate() {
   saveItems(next);
 
   setShowNewModal(false);
-  router.push(`/item/${id}`);
+  router.push(`/project/${id}`);
 }
   /* =========================
      [5] UI
