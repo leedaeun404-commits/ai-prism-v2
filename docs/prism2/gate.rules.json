@@ -1,0 +1,105 @@
+{
+  "version": "1.0.0",
+  "purpose": "Stage gate rules for PRISM 2.0",
+  "gates": {
+    "screening": {
+      "entry": [
+        "project.status in ['screening', 'draft']"
+      ],
+      "required_fields": [
+        "problem.who",
+        "problem.as_is",
+        "problem.to_be",
+        "value.money_link.type",
+        "value.money_link.description",
+        "value.kpi_hypothesis",
+        "ai_fit.without_ai",
+        "ai_fit.minimum_role",
+        "scope.automation_level",
+        "risk.severity",
+        "risk.failure_impact",
+        "mvp.in_scope",
+        "mvp.out_of_scope"
+      ],
+      "decision_rules": [
+        {
+          "id": "STOP_HIGH_RISK_AUTO_DECIDE",
+          "when_all": [
+            "risk.severity == 'high'",
+            "scope.automation_level == 'publish_or_decide'"
+          ],
+          "outcome": "stop",
+          "reason": "High-risk with full automation"
+        },
+        {
+          "id": "HOLD_NO_KPI",
+          "when_all": [
+            "value.kpi_hypothesis is empty"
+          ],
+          "outcome": "hold",
+          "reason": "No KPI hypothesis"
+        },
+        {
+          "id": "REVIEW_AI_NEED",
+          "when_all": [
+            "ai_fit.minimum_role == 'none'"
+          ],
+          "outcome": "hold",
+          "reason": "AI necessity is weak"
+        }
+      ],
+      "scoring": {
+        "weights": {
+          "risk": 40,
+          "ai_fit": 30,
+          "kpi_clarity": 30
+        },
+        "formula": "total = risk_score + ai_fit_score + kpi_score",
+        "bands": [
+          { "label": "go_candidate", "min": 70, "max": 100 },
+          { "label": "hold_candidate", "min": 50, "max": 69 },
+          { "label": "stop_candidate", "min": 0, "max": 49 }
+        ]
+      },
+      "exit": [
+        "all required_fields are present",
+        "screening.decision in ['go', 'hold', 'stop']",
+        "screening.approved_by is not null"
+      ]
+    },
+    "execution": {
+      "entry": [
+        "screening.decision == 'go'"
+      ],
+      "required_blocks": [
+        "problem_expanded",
+        "state_model",
+        "automation_policy",
+        "risk_ops",
+        "tech_seed"
+      ],
+      "exit": [
+        "all required_blocks complete",
+        "execution.readiness == 'ready_for_tech_spec'"
+      ]
+    },
+    "tech_spec": {
+      "entry": [
+        "execution.readiness == 'ready_for_tech_spec'"
+      ],
+      "required_blocks": [
+        "api_list",
+        "io_schema",
+        "server_state_transition",
+        "pipeline",
+        "auth_rate_limit",
+        "error_codes",
+        "monitoring"
+      ],
+      "exit": [
+        "spec.freeze_status == 'frozen'",
+        "spec.approver is not null"
+      ]
+    }
+  }
+}

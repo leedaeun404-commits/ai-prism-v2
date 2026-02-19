@@ -1,0 +1,76 @@
+{
+  "version": "1.0.0",
+  "entity": "project",
+  "states": [
+    "screening",
+    "screening_go",
+    "screening_hold",
+    "screening_stop",
+    "execution",
+    "tech_spec",
+    "freeze",
+    "archived"
+  ],
+  "transitions": [
+    {
+      "from": "screening",
+      "to": "screening_go",
+      "event": "screening.approved",
+      "guards": ["screening.decision == 'go'", "screening.approved_by exists"]
+    },
+    {
+      "from": "screening",
+      "to": "screening_hold",
+      "event": "screening.approved",
+      "guards": ["screening.decision == 'hold'", "screening.approved_by exists"]
+    },
+    {
+      "from": "screening",
+      "to": "screening_stop",
+      "event": "screening.approved",
+      "guards": ["screening.decision == 'stop'", "screening.approved_by exists"]
+    },
+    {
+      "from": "screening_hold",
+      "to": "screening",
+      "event": "screening.reopened",
+      "guards": ["actor.role in ['editor', 'approver']"]
+    },
+    {
+      "from": "screening_go",
+      "to": "execution",
+      "event": "execution.started",
+      "guards": ["execution.owner exists"]
+    },
+    {
+      "from": "execution",
+      "to": "tech_spec",
+      "event": "execution.ready",
+      "guards": ["execution.readiness == 'ready_for_tech_spec'"]
+    },
+    {
+      "from": "tech_spec",
+      "to": "freeze",
+      "event": "spec.frozen",
+      "guards": ["spec.approved_by exists", "spec.version exists"]
+    },
+    {
+      "from": "freeze",
+      "to": "execution",
+      "event": "spec.unfrozen",
+      "guards": ["actor.role == 'approver'", "change_request exists"]
+    },
+    {
+      "from": "freeze",
+      "to": "archived",
+      "event": "project.archived",
+      "guards": ["actor.role == 'approver'"]
+    }
+  ],
+  "forbidden_transitions": [
+    ["screening_stop", "execution"],
+    ["screening_hold", "tech_spec"],
+    ["screening", "freeze"],
+    ["execution", "freeze"]
+  ]
+}

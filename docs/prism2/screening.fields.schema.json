@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism.local/schema/screening.fields.schema.json",
+  "title": "PRISM 2.0 Screening Form",
+  "type": "object",
+  "required": [
+    "problem",
+    "value",
+    "ai_fit",
+    "scope",
+    "risk",
+    "mvp"
+  ],
+  "properties": {
+    "problem": {
+      "type": "object",
+      "required": ["who", "as_is", "to_be"],
+      "properties": {
+        "who": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "as_is": { "type": "string", "minLength": 5, "maxLength": 500 },
+        "to_be": { "type": "string", "minLength": 5, "maxLength": 500 }
+      },
+      "additionalProperties": false
+    },
+    "value": {
+      "type": "object",
+      "required": ["money_link", "kpi_hypothesis"],
+      "properties": {
+        "money_link": {
+          "type": "object",
+          "required": ["type", "description"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["direct_revenue", "cost_reduction", "retention", "conversion", "other"]
+            },
+            "description": { "type": "string", "minLength": 3, "maxLength": 300 }
+          },
+          "additionalProperties": false
+        },
+        "kpi_hypothesis": { "type": "string", "minLength": 3, "maxLength": 300 }
+      },
+      "additionalProperties": false
+    },
+    "ai_fit": {
+      "type": "object",
+      "required": ["without_ai", "minimum_role"],
+      "properties": {
+        "without_ai": { "type": "string", "minLength": 3, "maxLength": 500 },
+        "minimum_role": {
+          "type": "string",
+          "enum": ["summarize", "classify", "extract", "draft_generate", "recommend", "none"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "required": ["automation_level"],
+      "properties": {
+        "automation_level": {
+          "type": "string",
+          "enum": ["assist_only", "draft_only", "approval_required", "publish_or_decide"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "risk": {
+      "type": "object",
+      "required": ["severity", "failure_impact"],
+      "properties": {
+        "severity": { "type": "string", "enum": ["low", "medium", "high"] },
+        "failure_impact": { "type": "string", "minLength": 3, "maxLength": 500 }
+      },
+      "additionalProperties": false
+    },
+    "mvp": {
+      "type": "object",
+      "required": ["in_scope", "out_of_scope"],
+      "properties": {
+        "in_scope": { "type": "string", "minLength": 3, "maxLength": 500 },
+        "out_of_scope": { "type": "string", "minLength": 3, "maxLength": 500 }
+      },
+      "additionalProperties": false
+    },
+    "comment": { "type": "string", "maxLength": 2000 }
+  },
+  "additionalProperties": false
+}

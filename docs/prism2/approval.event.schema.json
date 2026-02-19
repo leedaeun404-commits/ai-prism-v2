@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism.local/schema/approval.event.schema.json",
+  "title": "PRISM Approval Event",
+  "type": "object",
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "project_id",
+    "stage",
+    "decision",
+    "actor",
+    "snapshot",
+    "reason"
+  ],
+  "properties": {
+    "event_id": { "type": "string", "minLength": 8 },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "screening.approved",
+        "screening.reopened",
+        "execution.ready",
+        "spec.frozen",
+        "spec.unfrozen",
+        "project.archived"
+      ]
+    },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "stage": {
+      "type": "string",
+      "enum": ["screening", "execution", "tech_spec", "freeze"]
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["go", "hold", "stop", "approve", "reject", "freeze", "unfreeze", "archive"]
+    },
+    "actor": {
+      "type": "object",
+      "required": ["user_id", "role"],
+      "properties": {
+        "user_id": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "enum": ["viewer", "editor", "approver", "system"] },
+        "team": { "type": "string", "enum": ["pm", "eng", "dsml", "ops", "exec", "platform"] }
+      },
+      "additionalProperties": false
+    },
+    "reason": { "type": "string", "minLength": 3, "maxLength": 1000 },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "ref"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["kpi", "risk", "policy", "comment", "metric", "doc"] },
+          "ref": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "snapshot": {
+      "type": "object",
+      "required": ["version", "hash"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "hash": { "type": "string", "minLength": 8 },
+        "summary": { "type": "string", "maxLength": 500 }
+      },
+      "additionalProperties": false
+    },
+    "trace": {
+      "type": "object",
+      "properties": {
+        "request_id": { "type": "string" },
+        "ip": { "type": "string" },
+        "user_agent": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

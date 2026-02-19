@@ -96,9 +96,9 @@ export default function Step2HomePage() {
 
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 22, fontWeight: 900 }}>STEP 2. 서비스 & DB 플로우</div>
+          <div style={{ fontSize: 22, fontWeight: 900 }}>STEP 2. 설계 초안</div>
           <div style={{ marginTop: 6, color: "#666", fontSize: 13, lineHeight: 1.5 }}>
-            유저 행동 → 서비스 처리 → AI → 데이터/로그 흐름을 “한 장”으로 설계해요.
+            사용자 행동 흐름과 AI 개입 위치를 정의하고, 구현 가능한 초안을 잠가요.
           </div>
         </div>
 
