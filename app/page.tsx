@@ -3,7 +3,7 @@
 /*
   [0] app/page.tsx = 홈(목록) 화면
   - [상단] 툴 제목 + 단계 설명(메인/서브 문장)
-  - [1층] 단계 탭 (1~7)
+  - [1층] 단계 탭 (1~4)
   - [2층] 필터 + 신규 버튼
   - [3층] 가로 테이블(기획 리스트)
   - [3층 하단] 총 n건 (테이블 왼쪽 아래)
@@ -12,12 +12,11 @@
   - +신규 버튼 동작:
     (1) 빈 기획 생성
     (2) localStorage 저장
-    (3) /project/[id]로 이동
+    (3) /project/[id]/screening 이동
 */
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getOrCreateMainStep2Flow } from "@/lib/step2Flows";
 
 /* =========================
    [1] 타입 정의
@@ -25,24 +24,20 @@ import { getOrCreateMainStep2Flow } from "@/lib/step2Flows";
 
 // [1-1] 단계(탭) 타입
 const STAGE1_OLD = "1. 문제 정의(데이터 정의)" as const;
-const STAGE1_NEW = "문제 & AI 적합성 검토" as const;
+const STAGE1_NEW = "STEP 1 전략 & 방향" as const;
 const STAGE2_OLD = "2. 가용 데이터(전처리)" as const;
-const STAGE2_NEW = "메인 플로우 설계" as const;
+const STAGE2_NEW = "STEP 2 설계 초안" as const;
 const STAGE3_OLD = "3. 모델 구조 설계" as const;
-const STAGE3_NEW = "기능 & 화면" as const;
+const STAGE3_NEW = "STEP 3 자동화 · 리스크" as const;
 const STAGE4_OLD = "4. 모델 학습" as const;
-const STAGE4_NEW = "AI 모델 & 데이터" as const;
+const STAGE4_NEW = "STEP 4 기술 스펙" as const;
 const STAGE5_OLD = "5. 모델 평가 & 검증" as const;
-const STAGE5_NEW = "운영 & 리스크" as const;
-const STAGE6_NEW = "비용 & 지표" as const;
 
 type Stage =
   | typeof STAGE1_NEW
   | typeof STAGE2_NEW
   | typeof STAGE3_NEW
-  | typeof STAGE4_NEW
-  | typeof STAGE5_NEW
-  | typeof STAGE6_NEW;
+  | typeof STAGE4_NEW;
 
 // [1-2] 홈 리스트에 저장되는 요약 아이템
 type Item = {
@@ -65,35 +60,25 @@ const STAGES: Stage[] = [
   STAGE2_NEW,
   STAGE3_NEW,
   STAGE4_NEW,
-  STAGE5_NEW,
-  STAGE6_NEW,
 ];
 
 // [2-2] 단계별 상단 문구(메인/서브) — “요. 체” + “무엇/왜/안하면” 톤 고정
 const STAGE_COPY: Record<Stage, { main: string; sub: string }> = {
   [STAGE1_NEW]: {
-    main: "문제를 정의하고, 데이터로 풀 수 있는지 확인해요.",
-    sub: "문제·AI 필요성·데이터가 한 흐름으로 연결되게 정리해요.",
+    main: "전략과 방향을 먼저 고정해요.",
+    sub: "왜 AI를 쓰는지, 누구 문제인지, AS-IS/TO-BE를 잠가요.",
   },
   [STAGE2_NEW]: {
-    main: "쓸 수 있는 데이터를 확정하고 전처리 기준을 정해요.",
-    sub: "데이터 품질/형태를 고정해요. 고정되지 않으면 학습이 흔들려요.",
+    main: "실행 가능한 설계 초안을 만들어요.",
+    sub: "상태 모델과 AI 개입 위치를 정의해 구현 가능한 형태로 정리해요.",
   },
   [STAGE3_NEW]: {
-    main: "이 문제를 어떤 방식으로 풀지 설계해요.",
-    sub: "입력·출력·제약을 먼저 고정해요. 고정되지 않으면 구현이 계속 바뀌어요.",
+    main: "자동화·리스크·운영 정책을 잠가요.",
+    sub: "confidence, human-in-loop, retry/rollback 기준을 명확히 정해요.",
   },
   [STAGE4_NEW]: {
-    main: "학습으로 갈지, 프롬프트로 충분한지 판단해요.",
-    sub: "학습 비용 대비 효과를 확인해요. 확인 없이 진행하면 되돌아와요.",
-  },
-  [STAGE5_NEW]: {
-    main: "서비스에 써도 되는 수준인지 검증해요.",
-    sub: "성공/실패 기준으로 통과 여부를 결정해요. 기준이 없으면 결론이 흔들려요.",
-  },
-  [STAGE6_NEW]: {
-    main: "성능 변화를 추적하고 유지 전략을 정해요.",
-    sub: "지표/로그/알림을 고정해요. 고정되지 않으면 이상을 놓쳐요.",
+    main: "정책을 기술 스펙으로 번역해요.",
+    sub: "API, 스키마, 상태 전이 규칙을 읽기 가능한 구현 문서로 정리해요.",
   },
 };
 
@@ -169,10 +154,10 @@ function normalizeStage(stage: string): Stage {
   if (stage === STAGE1_OLD) return STAGE1_NEW;
   if (stage === STAGE2_OLD) return STAGE2_NEW;
   if (stage === STAGE3_OLD) return STAGE3_NEW;
-  if (stage === STAGE4_OLD) return STAGE4_NEW;
-  if (stage === STAGE5_OLD) return STAGE5_NEW;
-  if (stage === "운영 & 비용 & 리스크") return STAGE5_NEW;
-  if (stage === "6. 모델 배포" || stage === "7. 모니터링 & 유지보수") return STAGE6_NEW;
+  if (stage === STAGE4_OLD) return STAGE3_NEW;
+  if (stage === STAGE5_OLD) return STAGE4_NEW;
+  if (stage === "운영 & 비용 & 리스크" || stage === "운영 & 리스크" || stage === "비용 & 지표") return STAGE4_NEW;
+  if (stage === "6. 모델 배포" || stage === "7. 모니터링 & 유지보수") return STAGE4_NEW;
   if ((STAGES as string[]).includes(stage)) return stage as Stage;
   return STAGES[0];
 }
@@ -305,22 +290,31 @@ export default function Home() {
   ------------------------- */
   const router = useRouter(); // [4-1-a] +신규 → 상세 이동
 
-    function openItem(it: Item) {
+  function openItem(it: Item) {
     const stage = normalizeStage(it.stage);
     // Step 1
-    if (stage === STAGE1_NEW || stage.startsWith("1.")) {
-      router.push(`/project/${it.id}`);
+    if (stage === STAGE1_NEW) {
+      router.push(`/project/${it.id}/screening`);
       return;
     }
 
     // Step 2
-    if (stage === STAGE2_NEW || stage.startsWith("2.")) {
-  const flow = getOrCreateMainStep2Flow(it.id);
-  router.push(`/project/${it.id}/screening`);
-  return;
-}
-    // 나머지는 일단 Step1
-    router.push(`/project/${it.id}`);
+    if (stage === STAGE2_NEW) {
+      router.push(`/project/${it.id}/execution`);
+      return;
+    }
+    // Step 3
+    if (stage === STAGE3_NEW) {
+      router.push(`/project/${it.id}/policy`);
+      return;
+    }
+    // Step 4
+    if (stage === STAGE4_NEW) {
+      router.push(`/project/${it.id}/tech-spec`);
+      return;
+    }
+    // 나머지는 STEP1
+    router.push(`/project/${it.id}/screening`);
   }
   
   /* -------------------------
@@ -377,7 +371,7 @@ export default function Home() {
    (3) 확인 시에만 실제 생성 + 이동
 ------------------------- */
 function handleNew() {
-  setNewTitle("ex) 이상거래 탐지 자동 분류"); // 기본 예시
+  setNewTitle("");
   setShowNewModal(true);                  // ✅ 모달만 연다
 }
 function confirmCreate() {
@@ -397,7 +391,7 @@ function confirmCreate() {
   saveItems(next);
 
   setShowNewModal(false);
-  router.push(`/project/${id}`);
+  router.push(`/project/${id}/screening`);
 }
   /* =========================
      [5] UI
