@@ -6,10 +6,10 @@ import { useParams } from "next/navigation";
 import {
   addHistoryEvent,
   canFreezeStep1,
+  computeRisk,
   generateStep2Data,
   HISTORY_EVENT_TYPES,
   getDefaultStep1,
-  getGoStopResult,
   getMissingStep1RequiredFields,
   getProgress,
   getStep1Data,
@@ -17,7 +17,85 @@ import {
   setStep1Data,
   setStep2Data,
   type Step1Data,
+  type Step1Exposure,
+  type Step1Hitl,
+  type Step1Impact,
+  type Step1NoAiAlternative,
+  type Step1ResultState,
+  type Step1Reversibility,
+  type Step1Target,
 } from "@/lib/prismMvp";
+
+const TARGET_OPTIONS: Array<{ value: Step1Target; label: string }> = [
+  { value: "internal_operator", label: "내부 운영자" },
+  { value: "content_writer", label: "콘텐츠 작성자" },
+  { value: "admin", label: "관리자" },
+  { value: "general_user", label: "일반 사용자" },
+  { value: "customer", label: "고객" },
+];
+
+const RESULT_STATE_OPTIONS: Array<{ value: Step1ResultState; label: string }> = [
+  { value: "draft", label: "draft 저장" },
+  { value: "status_change", label: "상태 변경" },
+  { value: "external_publish", label: "외부 게시" },
+  { value: "internal_reference", label: "내부 참고 자료" },
+];
+
+const NO_AI_OPTIONS: Array<{ value: Step1NoAiAlternative; label: string }> = [
+  { value: "manual", label: "수동 작성" },
+  { value: "template", label: "템플릿 기반" },
+  { value: "rule_based", label: "룰 기반 처리" },
+  { value: "search_based", label: "검색 기반" },
+  { value: "other", label: "기타" },
+];
+
+const EXPOSURE_OPTIONS: Array<{ value: Step1Exposure; label: string }> = [
+  { value: "internal", label: "내부 참고용" },
+  { value: "limited_external", label: "제한적 고객 노출" },
+  { value: "public", label: "누구나 공개" },
+];
+
+const REVERSIBILITY_OPTIONS: Array<{ value: Step1Reversibility; label: string }> = [
+  { value: "easy", label: "언제든 수정·중단 가능" },
+  { value: "limited", label: "일부만 수정 가능" },
+  { value: "irreversible", label: "되돌리기 어려움" },
+];
+
+const IMPACT_OPTIONS: Array<{ value: Step1Impact; label: string }> = [
+  { value: "low", label: "내부 업무 불편" },
+  { value: "medium", label: "고객 혼선" },
+  { value: "high", label: "금전·법적·브랜드 영향" },
+];
+
+const HITL_OPTIONS: Array<{ value: Step1Hitl; label: string }> = [
+  { value: "pre_review", label: "사람이 먼저 보고 결정" },
+  { value: "post_monitoring", label: "적용 후에만 지켜봄" },
+  { value: "none", label: "사람은 따로 보지 않음" },
+];
+
+const EXPOSURE_LABEL: Record<Step1Exposure, string> = {
+  internal: "내부 참고",
+  limited_external: "제한적 노출",
+  public: "전체 공개",
+};
+
+const REVERSIBILITY_LABEL: Record<Step1Reversibility, string> = {
+  easy: "수정/중단 용이",
+  limited: "일부만 수정 가능",
+  irreversible: "되돌리기 어려움",
+};
+
+const IMPACT_LABEL: Record<Step1Impact, string> = {
+  low: "내부 업무 불편",
+  medium: "고객 혼선",
+  high: "금전/법적/브랜드 영향",
+};
+
+const HITL_LABEL: Record<Step1Hitl, string> = {
+  pre_review: "사전 검토",
+  post_monitoring: "사후 모니터링",
+  none: "인간 개입 없음",
+};
 
 export default function ScreeningPage() {
   const params = useParams();
@@ -26,7 +104,6 @@ export default function ScreeningPage() {
   const [data, setData] = useState<Step1Data>(getDefaultStep1());
   const [frozen, setFrozen] = useState(false);
   const [message, setMessage] = useState("");
-  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "impact">("preview");
   const [rightPanelWidth, setRightPanelWidth] = useState(360);
   const [isResizing, setIsResizing] = useState(false);
   const twoPaneRef = useRef<HTMLDivElement | null>(null);
@@ -37,9 +114,16 @@ export default function ScreeningPage() {
     setFrozen(getProgress(id).step1Frozen);
   }, [id]);
 
-  const decision = useMemo(() => getGoStopResult(data), [data]);
-  const missingForFreeze = useMemo(() => getMissingStep1RequiredFields(data), [data]);
+  const riskLevel = useMemo(() => computeRisk(data), [data]);
   const freezeReady = canFreezeStep1(data);
+  const missingForFreeze = useMemo(() => getMissingStep1RequiredFields(data), [data]);
+
+  const autoDraft = true;
+  const autoPublish = data.exposure !== "public" && data.impact !== "high";
+  const manualReviewRequired = data.impact === "high" || data.hitl === "pre_review";
+  const stateFlow = manualReviewRequired
+    ? "입력 -> 생성 -> 초안 -> 검토 -> 승인 -> 게시"
+    : "입력 -> 생성 -> 초안 -> 승인 -> 게시";
 
   useEffect(() => {
     if (!isResizing) return;
@@ -66,6 +150,16 @@ export default function ScreeningPage() {
     setData((prev) => ({ ...prev, [key]: value }));
   }
 
+  function toggleMultiValue<K extends "target" | "no_ai_alternative">(key: K, value: Step1Data[K][number]) {
+    if (frozen) return;
+    setData((prev) => {
+      const current = prev[key] as string[];
+      const exists = current.includes(value as string);
+      const next = exists ? current.filter((v) => v !== value) : [...current, value as string];
+      return { ...prev, [key]: next } as Step1Data;
+    });
+  }
+
   function handleSave() {
     if (!id) return;
     setStep1Data(id, data);
@@ -74,6 +168,26 @@ export default function ScreeningPage() {
       stage: "step1",
       action: HISTORY_EVENT_TYPES.SAVE_STEP1,
       detail: "STEP1 저장",
+    });
+    addHistoryEvent(id, {
+      stage: "step1",
+      action: HISTORY_EVENT_TYPES.SET_EXPOSURE,
+      detail: `노출 범위=${data.exposure || "미정"}`,
+    });
+    addHistoryEvent(id, {
+      stage: "step1",
+      action: HISTORY_EVENT_TYPES.SET_REVERSIBILITY,
+      detail: `되돌림 가능성=${data.reversibility || "미정"}`,
+    });
+    addHistoryEvent(id, {
+      stage: "step1",
+      action: HISTORY_EVENT_TYPES.SET_IMPACT,
+      detail: `실패 비용 위치=${data.impact || "미정"}`,
+    });
+    addHistoryEvent(id, {
+      stage: "step1",
+      action: HISTORY_EVENT_TYPES.SET_HITL,
+      detail: `인간 개입 시점=${data.hitl || "미정"}`,
     });
     addHistoryEvent(id, {
       stage: "step2",
@@ -100,91 +214,181 @@ export default function ScreeningPage() {
     setMessage("STEP1 Freeze 완료 (수정 잠금)");
   }
 
-  function handleGenerateStep2Draft() {
-    if (!id) return;
-    setStep2Data(id, generateStep2Data(data));
-    addHistoryEvent(id, {
-      stage: "step2",
-      action: HISTORY_EVENT_TYPES.GENERATE_STEP2_DRAFT,
-      detail: "사용자 수동 실행으로 STEP2 초안 생성",
-    });
-    setMessage("STEP2 설계 초안 생성 완료");
-  }
-
   return (
     <div ref={twoPaneRef} className="two-pane" style={twoPaneStyle}>
       <section style={mainPanelStyle}>
         <h1 style={titleStyle}>STEP 1 전략&방향</h1>
-        <p style={subtleStyle}>입력 고정 후 Freeze해야 다음 단계로 이동할 수 있습니다.</p>
+        <p style={subtleStyle}>전략 입력을 고정하고 운영 감당선(4축)을 선언하면 다음 단계가 열립니다.</p>
 
-        <div style={fieldGridStyle}>
-          <LabeledText
-            label="왜 AI를 붙이는가"
-            value={data.why_ai}
-            onChange={(v) => update("why_ai", v)}
-            disabled={frozen}
-          />
-          <LabeledText
-            label="누구를 위한 기능인가"
-            value={data.target_user}
-            onChange={(v) => update("target_user", v)}
-            disabled={frozen}
-          />
-          <LabeledText
-            label="AS-IS 문제"
-            value={data.as_is_problem}
-            onChange={(v) => update("as_is_problem", v)}
-            disabled={frozen}
-            textarea
-          />
-          <LabeledText
-            label="끝나면 무엇이 남는가 (결과 상태/저장물)"
-            value={data.result_artifact}
-            onChange={(v) => update("result_artifact", v)}
-            disabled={frozen}
-            textarea
-          />
-
-          <label style={labelStyle}>
-            AI는 어디까지 맡는가 (최소 역할)
-            <select
-              value={data.ai_min_role}
-              onChange={(e) => update("ai_min_role", e.target.value as Step1Data["ai_min_role"])}
+        <div style={blockStyle}>
+          <div style={blockTitleStyle}>① 전략 목적 블록 (의도 고정)</div>
+          <QuestionRow question="왜 AI를 붙이나요?">
+            <textarea
+              value={data.why}
+              onChange={(e) => update("why", e.target.value)}
               disabled={frozen}
-              style={inputStyle}
-            >
-              <option value="draft_only">draft_only</option>
-              <option value="auto_publish">auto_publish</option>
-            </select>
-          </label>
+              placeholder="반복 작업 자동화, 시간 단축, 비용 절감, 일관성 확보"
+              style={{ ...inputStyle, minHeight: 84 }}
+            />
+          </QuestionRow>
+          <QuestionRow question="누구를 위한 기능인가요?">
+            <div style={choiceGroupStyle}>
+              {TARGET_OPTIONS.map((option) => (
+                <label key={option.value} style={choiceLabelStyle}>
+                  <input
+                    type="checkbox"
+                    checked={data.target.includes(option.value)}
+                    onChange={() => toggleMultiValue("target", option.value)}
+                    disabled={frozen}
+                  />
+                  {option.label}
+                </label>
+              ))}
+              <input
+                value={data.target_detail}
+                onChange={(e) => update("target_detail", e.target.value)}
+                disabled={frozen}
+                placeholder="보완 설명 (선택)"
+                style={inputStyle}
+              />
+            </div>
+          </QuestionRow>
+        </div>
 
-          <label style={labelStyle}>
-            리스크 허용 수준
-            <select
-              value={data.risk_level}
-              onChange={(e) => update("risk_level", e.target.value as Step1Data["risk_level"])}
+        <div style={blockStyle}>
+          <div style={blockTitleStyle}>② 문제 정의 블록</div>
+          <QuestionRow question="현재 어떤 문제가 있나요? (AS-IS)">
+            <textarea
+              value={data.as_is}
+              onChange={(e) => update("as_is", e.target.value)}
               disabled={frozen}
-              style={inputStyle}
-            >
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-            </select>
-          </label>
+              style={{ ...inputStyle, minHeight: 84 }}
+            />
+          </QuestionRow>
+          <QuestionRow question="이게 성공이라면 무엇이 달라져야 하나요? (KPI/지표)">
+            <textarea
+              value={data.kpi}
+              onChange={(e) => update("kpi", e.target.value)}
+              disabled={frozen}
+              style={{ ...inputStyle, minHeight: 84 }}
+            />
+          </QuestionRow>
+        </div>
 
-          <LabeledText
-            label="KPI/지표 가설"
-            value={data.kpi_hypothesis}
-            onChange={(v) => update("kpi_hypothesis", v)}
-            disabled={frozen}
-            textarea
-          />
-          <LabeledText
-            label="AI 없이 대안 1줄"
-            value={data.no_ai_alternative}
-            onChange={(v) => update("no_ai_alternative", v)}
-            disabled={frozen}
-          />
+        <div style={blockStyle}>
+          <div style={blockTitleStyle}>③ 결과 정의 블록 (출구 고정)</div>
+          <QuestionRow question="이 플로우가 끝나면 무엇이 남나요? (결과 상태)">
+            <div style={choiceGroupStyle}>
+              {RESULT_STATE_OPTIONS.map((option) => (
+                <label key={option.value} style={choiceLabelStyle}>
+                  <input
+                    type="radio"
+                    name="result_state"
+                    checked={data.result_state === option.value}
+                    onChange={() => update("result_state", option.value)}
+                    disabled={frozen}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+          </QuestionRow>
+        </div>
+
+        <div style={blockStyle}>
+          <div style={blockTitleStyle}>④ AI 대안 블록 (현실성 체크)</div>
+          <QuestionRow question="AI 없이 가능한 방법은 무엇인가요?">
+            <div style={choiceGroupStyle}>
+              {NO_AI_OPTIONS.map((option) => (
+                <label key={option.value} style={choiceLabelStyle}>
+                  <input
+                    type="checkbox"
+                    checked={data.no_ai_alternative.includes(option.value)}
+                    onChange={() => toggleMultiValue("no_ai_alternative", option.value)}
+                    disabled={frozen}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+          </QuestionRow>
+          <QuestionRow question="AI 없이 보완 설명이 필요한가요? (선택)">
+            <input
+              value={data.no_ai_alternative_detail}
+              onChange={(e) => update("no_ai_alternative_detail", e.target.value)}
+              disabled={frozen}
+              placeholder="예: 템플릿 + 수동 편집 조합"
+              style={inputStyle}
+            />
+          </QuestionRow>
+        </div>
+
+        <div style={blockStyle}>
+          <div style={blockTitleStyle}>⑤ 운영 감당선 블록 (4축)</div>
+          <QuestionRow question="AI 결과가 외부에 공개되나요? (Exposure)">
+            <div style={choiceGroupStyle}>
+              {EXPOSURE_OPTIONS.map((option) => (
+                <label key={option.value} style={choiceLabelStyle}>
+                  <input
+                    type="radio"
+                    name="exposure"
+                    checked={data.exposure === option.value}
+                    onChange={() => update("exposure", option.value)}
+                    disabled={frozen}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+          </QuestionRow>
+          <QuestionRow question="문제가 생기면 되돌릴 수 있나요? (Reversibility)">
+            <div style={choiceGroupStyle}>
+              {REVERSIBILITY_OPTIONS.map((option) => (
+                <label key={option.value} style={choiceLabelStyle}>
+                  <input
+                    type="radio"
+                    name="reversibility"
+                    checked={data.reversibility === option.value}
+                    onChange={() => update("reversibility", option.value)}
+                    disabled={frozen}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+          </QuestionRow>
+          <QuestionRow question="틀리면 가장 부담이 큰 곳은 어디인가요? (Impact)">
+            <div style={choiceGroupStyle}>
+              {IMPACT_OPTIONS.map((option) => (
+                <label key={option.value} style={choiceLabelStyle}>
+                  <input
+                    type="radio"
+                    name="impact"
+                    checked={data.impact === option.value}
+                    onChange={() => update("impact", option.value)}
+                    disabled={frozen}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+          </QuestionRow>
+          <QuestionRow question="사람이 언제 한 번이라도 보게 되나요? (HITL)">
+            <div style={choiceGroupStyle}>
+              {HITL_OPTIONS.map((option) => (
+                <label key={option.value} style={choiceLabelStyle}>
+                  <input
+                    type="radio"
+                    name="hitl"
+                    checked={data.hitl === option.value}
+                    onChange={() => update("hitl", option.value)}
+                    disabled={frozen}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+          </QuestionRow>
         </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
@@ -214,55 +418,45 @@ export default function ScreeningPage() {
       />
 
       <aside className="right-pane" style={{ ...sidePanelStyle, width: rightPanelWidth }}>
-        <h2 style={{ margin: 0, fontSize: 16 }}>우측 패널</h2>
-        <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-          <button
-            type="button"
-            onClick={() => setRightPanelTab("preview")}
-            style={{ ...topPanelTabStyle, background: rightPanelTab === "preview" ? "#111827" : "#f3f4f6", color: rightPanelTab === "preview" ? "#fff" : "#374151", borderColor: rightPanelTab === "preview" ? "#111827" : "#d1d5db" }}
-          >
-            Preview
-          </button>
-          <button
-            type="button"
-            onClick={() => setRightPanelTab("impact")}
-            style={{ ...topPanelTabStyle, background: rightPanelTab === "impact" ? "#111827" : "#f3f4f6", color: rightPanelTab === "impact" ? "#fff" : "#374151", borderColor: rightPanelTab === "impact" ? "#111827" : "#d1d5db" }}
-          >
-            영향도맵
-          </button>
+        <h2 style={{ margin: 0, fontSize: 16 }}>우측 프리뷰</h2>
+        <p style={{ ...subtleStyle, marginTop: 8 }}>입력값이 운영 구조로 실시간 번역됩니다.</p>
+
+        <div style={previewCardStyle}>
+          <div style={previewTitleStyle}>1) 운영 감당선 요약</div>
+          <ul style={previewListStyle}>
+            <li>노출 범위: {data.exposure ? EXPOSURE_LABEL[data.exposure] : "미선택"}</li>
+            <li>되돌림 가능성: {data.reversibility ? REVERSIBILITY_LABEL[data.reversibility] : "미선택"}</li>
+            <li>실패 비용 위치: {data.impact ? IMPACT_LABEL[data.impact] : "미선택"}</li>
+            <li>인간 개입 시점: {data.hitl ? HITL_LABEL[data.hitl] : "미선택"}</li>
+          </ul>
         </div>
 
-        {rightPanelTab === "preview" && (
-          <>
-            <div
-              style={{
-                marginTop: 10,
-                border: "1px solid #e5e7eb",
-                borderRadius: 10,
-                padding: 12,
-                background: decision === "STOP" ? "#fef2f2" : "#f0fdf4",
-              }}
-            >
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>GO / STOP 카드</div>
-              <div style={{ fontSize: 22, fontWeight: 800 }}>{decision}</div>
-              <p style={{ ...subtleStyle, marginTop: 8 }}>
-                룰: risk_level=high & ai_min_role=auto_publish 이면 STOP
-              </p>
-            </div>
+        <div style={previewCardStyle}>
+          <div style={previewTitleStyle}>2) 자동화 범위</div>
+          <ul style={previewListStyle}>
+            <li>초안 자동 생성: {autoDraft ? "활성화" : "비활성화"}</li>
+            <li>자동 게시: {autoPublish ? "활성화" : "비활성화"}</li>
+            <li>사전 검토 단계 삽입: {manualReviewRequired ? "예" : "아니오"}</li>
+          </ul>
+        </div>
 
-            <button onClick={handleGenerateStep2Draft} style={{ ...buttonStyle, marginTop: 12, width: "100%" }}>
-              STEP2 초안 생성
-            </button>
-          </>
-        )}
+        <div style={previewCardStyle}>
+          <div style={previewTitleStyle}>3) 상태 흐름 미리보기</div>
+          <div style={previewFlowStyle}>{stateFlow}</div>
+        </div>
 
-        {rightPanelTab === "impact" && (
-          <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, background: "#f8fafc" }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>영향도맵</div>
-            <p style={{ ...subtleStyle, marginTop: 6 }}>영향도맵 상세 내용은 다음 단계에서 추가 예정입니다.</p>
-          </div>
-        )}
+        <div
+          style={{
+            ...previewCardStyle,
+            background: riskLevel === "high" ? "#fef2f2" : riskLevel === "medium" ? "#fffbeb" : "#f0fdf4",
+            borderColor: riskLevel === "high" ? "#fecaca" : riskLevel === "medium" ? "#fde68a" : "#bbf7d0",
+          }}
+        >
+          <div style={previewTitleStyle}>4) Risk Profile</div>
+          <div style={{ fontSize: 20, fontWeight: 800 }}>RISK PROFILE: {riskLevel.toUpperCase()}</div>
+        </div>
       </aside>
+
       <style jsx>{`
         .two-pane {
           display: flex;
@@ -295,28 +489,14 @@ export default function ScreeningPage() {
   );
 }
 
-function LabeledText({
-  label,
-  value,
-  onChange,
-  disabled,
-  textarea,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  disabled: boolean;
-  textarea?: boolean;
-}) {
+function QuestionRow({ question, children }: { question: string; children: React.ReactNode }) {
   return (
-    <label style={labelStyle}>
-      {label}
-      {textarea ? (
-        <textarea value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} style={{ ...inputStyle, minHeight: 84 }} />
-      ) : (
-        <input value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} style={inputStyle} />
-      )}
-    </label>
+    <div style={questionRowStyle}>
+      <div style={questionLabelStyle}>
+        <div>{question}</div>
+      </div>
+      <div style={questionInputStyle}>{children}</div>
+    </div>
   );
 }
 
@@ -358,19 +538,55 @@ const subtleStyle: CSSProperties = {
   fontSize: 15,
 };
 
-const fieldGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 12,
+const blockStyle: CSSProperties = {
   marginTop: 14,
+  border: "1px solid #e5e7eb",
+  borderRadius: 10,
+  background: "#fff",
+  overflow: "hidden",
 };
 
-const labelStyle: CSSProperties = {
+const blockTitleStyle: CSSProperties = {
+  fontSize: 14,
+  fontWeight: 700,
+  color: "#111827",
+  padding: "10px 12px",
+  background: "#f8fafc",
+  borderBottom: "1px solid #e5e7eb",
+};
+
+const questionRowStyle: CSSProperties = {
   display: "grid",
-  gap: 6,
-  fontSize: 15,
-  fontWeight: 600,
-  color: "#4b5563",
+  gridTemplateColumns: "240px minmax(0, 1fr)",
+  gap: 12,
+  padding: "12px",
+  borderTop: "1px solid #f1f5f9",
+};
+
+const questionLabelStyle: CSSProperties = {
+  display: "grid",
+  fontSize: 14,
+  fontWeight: 700,
+  color: "#374151",
+  paddingTop: 8,
+};
+
+const questionInputStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const choiceGroupStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const choiceLabelStyle: CSSProperties = {
+  display: "flex",
+  gap: 8,
+  alignItems: "center",
+  fontSize: 14,
+  color: "#374151",
 };
 
 const inputStyle: CSSProperties = {
@@ -380,6 +596,7 @@ const inputStyle: CSSProperties = {
   fontSize: 15,
   color: "#374151",
   background: "#f9fafb",
+  width: "100%",
 };
 
 const buttonStyle: CSSProperties = {
@@ -392,16 +609,38 @@ const buttonStyle: CSSProperties = {
   cursor: "pointer",
 };
 
-const topPanelTabStyle: CSSProperties = {
-  borderWidth: 1,
-  borderStyle: "solid",
-  borderRadius: 8,
-  fontSize: 12,
-  fontWeight: 700,
-  padding: "6px 12px",
-  cursor: "pointer",
-};
-
 const resizerStyle: CSSProperties = {
   background: "transparent",
+};
+
+const previewCardStyle: CSSProperties = {
+  marginTop: 10,
+  border: "1px solid #e5e7eb",
+  borderRadius: 10,
+  padding: 12,
+  background: "#fff",
+};
+
+const previewTitleStyle: CSSProperties = {
+  fontSize: 14,
+  fontWeight: 700,
+  marginBottom: 6,
+};
+
+const previewListStyle: CSSProperties = {
+  margin: 0,
+  paddingLeft: 16,
+  display: "grid",
+  gap: 4,
+  fontSize: 13,
+  color: "#374151",
+};
+
+const previewFlowStyle: CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 8,
+  padding: "8px 10px",
+  background: "#f8fafc",
+  fontSize: 13,
+  color: "#1f2937",
 };

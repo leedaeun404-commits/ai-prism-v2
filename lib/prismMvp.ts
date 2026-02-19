@@ -1,17 +1,27 @@
 import { z } from "zod";
 
 export type RiskLevel = "low" | "medium" | "high";
-export type AiMinRole = "draft_only" | "auto_publish";
+export type Step1Target = "internal_operator" | "content_writer" | "admin" | "general_user" | "customer";
+export type Step1ResultState = "draft" | "status_change" | "external_publish" | "internal_reference";
+export type Step1NoAiAlternative = "manual" | "template" | "rule_based" | "search_based" | "other";
+export type Step1Exposure = "internal" | "limited_external" | "public";
+export type Step1Reversibility = "easy" | "limited" | "irreversible";
+export type Step1Impact = "low" | "medium" | "high";
+export type Step1Hitl = "pre_review" | "post_monitoring" | "none";
 
 export type Step1Data = {
-  why_ai: string;
-  target_user: string;
-  as_is_problem: string;
-  result_artifact: string;
-  ai_min_role: AiMinRole;
-  risk_level: RiskLevel;
-  kpi_hypothesis: string;
-  no_ai_alternative: string;
+  why: string;
+  target: Step1Target[];
+  target_detail: string;
+  as_is: string;
+  result_state: Step1ResultState | "";
+  kpi: string;
+  no_ai_alternative: Step1NoAiAlternative[];
+  no_ai_alternative_detail: string;
+  exposure: Step1Exposure | "";
+  reversibility: Step1Reversibility | "";
+  impact: Step1Impact | "";
+  hitl: Step1Hitl | "";
 };
 
 export type Step2Data = {
@@ -125,6 +135,10 @@ export const HISTORY_EVENT_TYPES = {
   SAVE_STEP1: "SAVE_STEP1",
   GENERATE_STEP2_DRAFT: "GENERATE_STEP2_DRAFT",
   FREEZE_STEP1: "FREEZE_STEP1",
+  SET_EXPOSURE: "SET_EXPOSURE",
+  SET_REVERSIBILITY: "SET_REVERSIBILITY",
+  SET_IMPACT: "SET_IMPACT",
+  SET_HITL: "SET_HITL",
   SAVE_STEP2: "SAVE_STEP2",
   COMPLETE_STEP2: "COMPLETE_STEP2",
   GENERATE_STEP3_POLICY: "GENERATE_STEP3_POLICY",
@@ -193,14 +207,18 @@ const STEP3_REVIEW_KEYS = [
 ] as const;
 
 const step1Schema = z.object({
-  why_ai: z.string(),
-  target_user: z.string(),
-  as_is_problem: z.string(),
-  result_artifact: z.string(),
-  ai_min_role: z.enum(["draft_only", "auto_publish"]),
-  risk_level: z.enum(["low", "medium", "high"]),
-  kpi_hypothesis: z.string(),
-  no_ai_alternative: z.string(),
+  why: z.string(),
+  target: z.array(z.enum(["internal_operator", "content_writer", "admin", "general_user", "customer"])),
+  target_detail: z.string(),
+  as_is: z.string(),
+  result_state: z.enum(["draft", "status_change", "external_publish", "internal_reference", ""]),
+  kpi: z.string(),
+  no_ai_alternative: z.array(z.enum(["manual", "template", "rule_based", "search_based", "other"])),
+  no_ai_alternative_detail: z.string(),
+  exposure: z.enum(["internal", "limited_external", "public", ""]),
+  reversibility: z.enum(["easy", "limited", "irreversible", ""]),
+  impact: z.enum(["low", "medium", "high", ""]),
+  hitl: z.enum(["pre_review", "post_monitoring", "none", ""]),
 });
 
 const step2Schema = z.object({
@@ -272,6 +290,10 @@ const historyActionSchema = z.enum([
   HISTORY_EVENT_TYPES.SAVE_STEP1,
   HISTORY_EVENT_TYPES.GENERATE_STEP2_DRAFT,
   HISTORY_EVENT_TYPES.FREEZE_STEP1,
+  HISTORY_EVENT_TYPES.SET_EXPOSURE,
+  HISTORY_EVENT_TYPES.SET_REVERSIBILITY,
+  HISTORY_EVENT_TYPES.SET_IMPACT,
+  HISTORY_EVENT_TYPES.SET_HITL,
   HISTORY_EVENT_TYPES.SAVE_STEP2,
   HISTORY_EVENT_TYPES.COMPLETE_STEP2,
   HISTORY_EVENT_TYPES.GENERATE_STEP3_POLICY,
@@ -308,8 +330,48 @@ function asRiskLevel(value: unknown): RiskLevel | undefined {
   return value === "low" || value === "medium" || value === "high" ? value : undefined;
 }
 
-function asAiMinRole(value: unknown): AiMinRole | undefined {
-  return value === "draft_only" || value === "auto_publish" ? value : undefined;
+function asStep1Target(value: unknown): Step1Target | undefined {
+  return value === "internal_operator" ||
+    value === "content_writer" ||
+    value === "admin" ||
+    value === "general_user" ||
+    value === "customer"
+    ? value
+    : undefined;
+}
+
+function asStep1NoAiAlternative(value: unknown): Step1NoAiAlternative | undefined {
+  return value === "manual" || value === "template" || value === "rule_based" || value === "search_based" || value === "other"
+    ? value
+    : undefined;
+}
+
+function asStep1ResultState(value: unknown): Step1ResultState | undefined {
+  return value === "draft" || value === "status_change" || value === "external_publish" || value === "internal_reference"
+    ? value
+    : undefined;
+}
+
+function asStep1Exposure(value: unknown): Step1Exposure | undefined {
+  return value === "internal" || value === "limited_external" || value === "public" ? value : undefined;
+}
+
+function asStep1Reversibility(value: unknown): Step1Reversibility | undefined {
+  return value === "easy" || value === "limited" || value === "irreversible" ? value : undefined;
+}
+
+function asStep1Impact(value: unknown): Step1Impact | undefined {
+  return value === "low" || value === "medium" || value === "high" ? value : undefined;
+}
+
+function asStep1Hitl(value: unknown): Step1Hitl | undefined {
+  return value === "pre_review" || value === "post_monitoring" || value === "none" ? value : undefined;
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const normalized = value.filter((item): item is string => typeof item === "string");
+  return normalized;
 }
 
 function asHistoryStage(value: unknown): HistoryStage | undefined {
@@ -412,6 +474,10 @@ const HISTORY_DEFAULT_SUMMARY: Record<HistoryEventAction, string> = {
   SAVE_STEP1: "STEP1 저장",
   GENERATE_STEP2_DRAFT: "STEP2 초안 생성",
   FREEZE_STEP1: "STEP1 Freeze 완료",
+  SET_EXPOSURE: "노출 범위 변경",
+  SET_REVERSIBILITY: "되돌림 가능성 변경",
+  SET_IMPACT: "실패 비용 위치 변경",
+  SET_HITL: "인간 개입 시점 변경",
   SAVE_STEP2: "STEP2 저장",
   COMPLETE_STEP2: "STEP2 완료",
   GENERATE_STEP3_POLICY: "STEP3 정책 초안 생성",
@@ -445,15 +511,38 @@ function recordSchemaInvalidRecovered(projectId: string, suffix: "step1" | "step
 
 function parseStep1(value: unknown): Partial<Step1Data> {
   if (!isRecord(value)) return {};
+  const targetFromArray = (asStringArray(value.target) ?? []).map((v) => asStep1Target(v)).filter((v): v is Step1Target => Boolean(v));
+  const legacyTarget = asString(value.target_user);
+  const target = targetFromArray.length > 0 ? targetFromArray : [];
+  if (target.length === 0 && legacyTarget?.trim()) {
+    target.push("content_writer");
+  }
+
+  const noAiFromArray = (asStringArray(value.no_ai_alternative) ?? [])
+    .map((v) => asStep1NoAiAlternative(v))
+    .filter((v): v is Step1NoAiAlternative => Boolean(v));
+  const legacyNoAi = asString(value.no_ai_alternative);
+  const noAiAlternatives = noAiFromArray.length > 0 ? noAiFromArray : [];
+  if (noAiAlternatives.length === 0 && legacyNoAi?.trim()) {
+    noAiAlternatives.push("manual");
+  }
+
+  const legacyRisk = asRiskLevel(value.risk_level);
+  const legacyAiMinRole = asString(value.ai_min_role);
+  const legacyResultArtifact = asString(value.result_artifact);
   return {
-    why_ai: asString(value.why_ai),
-    target_user: asString(value.target_user),
-    as_is_problem: asString(value.as_is_problem),
-    result_artifact: asString(value.result_artifact),
-    ai_min_role: asAiMinRole(value.ai_min_role),
-    risk_level: asRiskLevel(value.risk_level),
-    kpi_hypothesis: asString(value.kpi_hypothesis),
-    no_ai_alternative: asString(value.no_ai_alternative),
+    why: asString(value.why) ?? asString(value.why_ai),
+    target,
+    target_detail: asString(value.target_detail) ?? "",
+    as_is: asString(value.as_is) ?? asString(value.as_is_problem),
+    result_state: asStep1ResultState(value.result_state) ?? (legacyResultArtifact?.trim() ? "draft" : undefined),
+    kpi: asString(value.kpi) ?? asString(value.kpi_hypothesis),
+    no_ai_alternative: noAiAlternatives,
+    no_ai_alternative_detail: asString(value.no_ai_alternative_detail) ?? "",
+    exposure: asStep1Exposure(value.exposure) ?? (legacyRisk === "high" ? "public" : "limited_external"),
+    reversibility: asStep1Reversibility(value.reversibility) ?? (legacyRisk === "high" ? "limited" : "easy"),
+    impact: asStep1Impact(value.impact) ?? legacyRisk,
+    hitl: asStep1Hitl(value.hitl) ?? (legacyAiMinRole === "auto_publish" ? "none" : "pre_review"),
   };
 }
 
@@ -563,14 +652,18 @@ function parseHistory(value: unknown): HistoryEvent[] {
 
 export function getDefaultStep1(): Step1Data {
   return {
-    why_ai: "",
-    target_user: "",
-    as_is_problem: "",
-    result_artifact: "",
-    ai_min_role: "draft_only",
-    risk_level: "medium",
-    kpi_hypothesis: "",
-    no_ai_alternative: "",
+    why: "",
+    target: [],
+    target_detail: "",
+    as_is: "",
+    result_state: "",
+    kpi: "",
+    no_ai_alternative: [],
+    no_ai_alternative_detail: "",
+    exposure: "",
+    reversibility: "",
+    impact: "",
+    hitl: "",
   };
 }
 
@@ -761,31 +854,36 @@ export function addHistoryEvent(
 }
 
 export function getMissingStep1RequiredFields(step1: Step1Data): string[] {
-  const required: Array<{ key: keyof Step1Data; label: string }> = [
-    { key: "why_ai", label: "왜 AI를 붙이는가" },
-    { key: "target_user", label: "누구를 위한 기능인가" },
-    { key: "as_is_problem", label: "어떤 문제인가 (AS-IS)" },
-    { key: "result_artifact", label: "끝나면 무엇이 남는가" },
-    { key: "ai_min_role", label: "AI 최소 역할" },
-    { key: "risk_level", label: "리스크 허용 수준" },
-  ];
-
-  return required
-    .filter((f) => {
-      const value = step1[f.key];
-      return typeof value === "string" ? !value.trim() : !value;
-    })
-    .map((f) => f.label);
+  const missing: string[] = [];
+  if (!step1.why.trim()) missing.push("왜 AI를 붙이는가");
+  if (step1.target.length === 0) missing.push("누구를 위한 기능인가");
+  if (!step1.as_is.trim()) missing.push("어떤 문제인가 (AS-IS)");
+  if (!step1.result_state) missing.push("끝나면 무엇이 남는가");
+  if (!step1.kpi.trim()) missing.push("KPI/지표 가설");
+  if (step1.no_ai_alternative.length === 0) missing.push("AI 없이 대안");
+  if (!step1.exposure) missing.push("노출 범위");
+  if (!step1.reversibility) missing.push("되돌림 가능성");
+  if (!step1.impact) missing.push("실패 비용 위치");
+  if (!step1.hitl) missing.push("인간 개입 시점");
+  return missing;
 }
 
 export function canFreezeStep1(step1: Step1Data) {
   return getMissingStep1RequiredFields(step1).length === 0;
 }
 
+export function computeRisk(input: Pick<Step1Data, "exposure" | "reversibility" | "impact" | "hitl">): RiskLevel {
+  if (input.impact === "high") return "high";
+  if (input.exposure === "public" && input.hitl === "none") return "high";
+  if (input.reversibility === "irreversible") return "high";
+  if (input.impact === "medium") return "medium";
+  return "low";
+}
+
 export function getGoStopResult(step1: Step1Data): "GO" | "STOP" {
-  if (step1.risk_level === "high" && step1.ai_min_role === "auto_publish") {
-    return "STOP";
-  }
+  const risk = computeRisk(step1);
+  const canAutoPublish = step1.exposure !== "public" && step1.impact !== "high";
+  if (risk === "high" && !canAutoPublish) return "STOP";
   return "GO";
 }
 
@@ -806,18 +904,35 @@ export function generateStep2Draft(step1: Step1Data): string {
 }
 
 export function generateStep2Data(step1: Step1Data): Step2Data {
+  const requiresPreReview = step1.hitl === "pre_review" || step1.impact === "high";
+  const canAutoPublish = step1.exposure !== "public" && step1.impact !== "high";
+  const statusModel = requiresPreReview
+    ? "input -> generating -> draft -> review_requested -> approved -> published (failed/rejected 별도 권장)"
+    : "input -> generating -> draft -> user_edit -> publish_requested -> published (failed/rejected 별도 권장)";
+  const exposurePolicy =
+    step1.exposure === "public"
+      ? "외부 공개 단계는 승인(휴먼 검토) 필수"
+      : step1.exposure === "limited_external"
+        ? "제한적 외부 노출은 정책 기준 충족 시 승인"
+        : "내부 참고용은 내부 정책 기준으로 처리";
+  const monitoringLevel =
+    step1.impact === "high"
+      ? "오류율/승인 반려율/정책 위반율을 강화 모니터링"
+      : step1.impact === "medium"
+        ? "오류율/응답시간/사용자 수정률 기본 모니터링"
+        : "오류율/응답시간 경량 모니터링";
   return {
     ...getDefaultStep2(),
-    status_model: "input -> generating -> draft -> user_edit -> publish (failed/rejected 별도 권장)",
+    status_model: statusModel,
     user_flow: "프로젝트 생성 -> 입력 작성 -> AI 초안 생성 -> 수정 -> 게시 요청",
     ai_intervention: "입력 완료 시 draft 단계에서 자동 초안 생성",
-    system_process: "입력값 검증 -> AI 호출 -> 결과 저장 -> 상태 draft 변경 (실패 시 failed)",
-    human_control: `사용자 수정 가능, publish 승인 필요 (AI 최소 역할: ${step1.ai_min_role})`,
+    system_process: `입력값 검증 -> AI 호출 -> 결과 저장 -> 상태 draft 변경 (실패 시 failed), 정책: ${exposurePolicy}`,
+    human_control: requiresPreReview ? "사전 리뷰(pre_review) 후 게시 가능" : "게시 후 모니터링(post_monitoring) 기반 운영",
     failure_strategy: "AI 실패 시 1회 재시도 -> 실패 시 알림 및 수동 모드 전환 (idempotent 처리)",
     delivery_mode: "화면에 초안 + 상태 배지(draft) 노출, 저장 완료 후 노출",
     data_storage: "post_drafts 저장 + confidence + version 필드",
     log_fields: "input/output/model_version/call_time/latency/error_code",
-    cost_strategy: "기본 모델 우선, 고난도 입력만 상위 모델 (서버 정책으로 결정)",
+    cost_strategy: `${canAutoPublish ? "자동 게시 조건부 허용" : "자동 게시 비활성"} / ${monitoringLevel}`,
   };
 }
 
@@ -909,7 +1024,7 @@ export function generateStep3Policy(step1: Step1Data, step2: Step2Data): Step3Po
     data_assetization_strategy: "사용자 수정 로그만 저장, 자동 학습은 미적용",
     monitoring_standard: "오류율/응답시간/사용자 수정률 추적 (오류율 3% 이하 유지 목표)",
     rollback_standard: "오류율 5% 초과 시 이전 모델로 롤백 (모델 단위)",
-    model_versioning: `모델 버전 및 호출 로그 필수 저장 (대상 사용자: ${step1.target_user || "미정"}, 상태 모델: ${step2.status_model || "미정"})`,
+    model_versioning: `모델 버전 및 호출 로그 필수 저장 (대상 사용자: ${step1.target.join(", ") || "미정"}, 상태 모델: ${step2.status_model || "미정"})`,
   };
 }
 
@@ -940,6 +1055,7 @@ export function canCompleteStep3(step3: Step3Policy): boolean {
 }
 
 export function generateTechSpec(step1: Step1Data, step2Draft: string, step3: Step3Policy): string {
+  const risk = computeRisk(step1);
   return [
     "# STEP4 기술 스펙 (더미)",
     "",
@@ -949,14 +1065,17 @@ export function generateTechSpec(step1: Step1Data, step2Draft: string, step3: St
     "- PATCH /edit",
     "",
     "## 입력 맥락",
-    `- why_ai: ${step1.why_ai || "미정"}`,
-    `- target_user: ${step1.target_user || "미정"}`,
-    `- as_is_problem: ${step1.as_is_problem || "미정"}`,
-    `- result_artifact: ${step1.result_artifact || "미정"}`,
-    `- ai_min_role: ${step1.ai_min_role}`,
-    `- risk_level: ${step1.risk_level}`,
-    `- kpi_hypothesis: ${step1.kpi_hypothesis || "미정"}`,
-    `- no_ai_alternative: ${step1.no_ai_alternative || "미정"}`,
+    `- why: ${step1.why || "미정"}`,
+    `- target: ${step1.target.join(", ") || "미정"}`,
+    `- as_is: ${step1.as_is || "미정"}`,
+    `- result_state: ${step1.result_state || "미정"}`,
+    `- kpi: ${step1.kpi || "미정"}`,
+    `- no_ai_alternative: ${step1.no_ai_alternative.join(", ") || "미정"}`,
+    `- exposure: ${step1.exposure || "미정"}`,
+    `- reversibility: ${step1.reversibility || "미정"}`,
+    `- impact: ${step1.impact || "미정"}`,
+    `- hitl: ${step1.hitl || "미정"}`,
+    `- risk_level(computed): ${risk}`,
     "",
     "## 정책",
     `- automation_level_adjustment: ${step3.automation_level_adjustment}`,
