@@ -8,25 +8,19 @@ import {
   canAccessTechSpec,
   generateTechSpecRows,
   getStep4Rows,
+  HISTORY_EVENT_TYPES,
+  TECH_SPEC_ROW_DEFS,
   getProgress,
   getStep1Data,
   getStep2Data,
   getStep3Policy,
   setStep4Rows,
   type Step4Row,
+  type Step4RowId,
+  type Step4TabKey,
 } from "@/lib/prismMvp";
 
-type DiagramTab =
-  | "state"
-  | "sequence"
-  | "error_retry"
-  | "auth"
-  | "dataflow"
-  | "observability"
-  | "pipeline"
-  | "rollback"
-  | "cost"
-  | "ia";
+type DiagramTab = Step4TabKey;
 
 const DIAGRAM_TABS: Array<{ key: DiagramTab; label: string }> = [
   { key: "state", label: "State" },
@@ -54,23 +48,6 @@ const DIAGRAM_TAB_META: Record<DiagramTab, { label: string; bg: string; fg: stri
   ia: { label: "IA", bg: "#e5e7eb", fg: "#1f2937", border: "#cbd5e1" },
 };
 
-const ROW_DIAGRAM_LINKS: Record<string, DiagramTab[]> = {
-  "API 정의": ["sequence", "auth", "pipeline"],
-  "입력 스키마": ["dataflow", "sequence"],
-  "출력 스키마": ["dataflow", "sequence"],
-  "상태 모델": ["state", "pipeline", "rollback"],
-  "상태 전이 규칙": ["state", "error_retry", "pipeline"],
-  "모델 조건": ["cost", "pipeline", "dataflow"],
-  "Fallback 조건": ["error_retry", "pipeline"],
-  "Guardrail 정책": ["error_retry", "dataflow", "auth"],
-  "저장 구조": ["dataflow", "observability", "rollback"],
-  "로그 구조": ["observability", "dataflow"],
-  "모니터링 항목": ["observability", "rollback", "cost"],
-  "롤백 정책": ["rollback", "observability"],
-  "보안/PII 정책": ["auth", "dataflow"],
-  "실행 구조": ["pipeline", "sequence", "state"],
-};
-
 export default function TechSpecPage() {
   const params = useParams();
   const id = String(params?.id ?? "");
@@ -82,6 +59,7 @@ export default function TechSpecPage() {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [dropPosition, setDropPosition] = useState<"before" | "after">("before");
   const [diagramTab, setDiagramTab] = useState<DiagramTab>("state");
+  const [selectedRowId, setSelectedRowId] = useState<Step4RowId | null>(null);
   const [rightPanelWidth, setRightPanelWidth] = useState(420);
   const [isResizing, setIsResizing] = useState(false);
   const twoPaneRef = useRef<HTMLDivElement | null>(null);
@@ -102,24 +80,28 @@ export default function TechSpecPage() {
     if (savedRows.length === 0) {
       setRows(generatedRows);
       setStep4Rows(id, generatedRows);
+      setSelectedRowId(generatedRows[0]?.rowId ?? null);
     } else {
-      const savedMap = new Map(savedRows.map((r) => [r.item, r]));
+      const savedMap = new Map(savedRows.map((r) => [r.rowId, r]));
       const merged = generatedRows.map((row) => {
-        const saved = savedMap.get(row.item);
+        const saved = savedMap.get(row.rowId);
         if (!saved) return row;
         return {
-          item: row.item,
+          rowId: row.rowId,
+          title: row.title,
+          relatedTabs: row.relatedTabs,
           spec: saved.spec || row.spec,
           note: saved.note || row.note,
         };
       });
       setRows(merged);
       setStep4Rows(id, merged);
+      setSelectedRowId((prev) => prev ?? merged[0]?.rowId ?? null);
     }
   }, [id]);
 
-  function updateRow(item: string, key: "spec" | "note", value: string) {
-    setRows((prev) => prev.map((row) => (row.item === item ? { ...row, [key]: value } : row)));
+  function updateRow(rowId: Step4RowId, key: "spec" | "note", value: string) {
+    setRows((prev) => prev.map((row) => (row.rowId === rowId ? { ...row, [key]: value } : row)));
   }
 
   function moveRow(from: number, to: number) {
@@ -138,34 +120,34 @@ export default function TechSpecPage() {
     setStep4Rows(id, rows);
     addHistoryEvent(id, {
       stage: "step4",
-      action: "save",
-      summary: "STEP4 기술 스펙 저장",
+      action: HISTORY_EVENT_TYPES.SAVE_STEP4,
+      detail: "STEP4 기술 스펙 저장",
     });
     setMessage("STEP4 저장 완료");
   }
 
   const specMap = useMemo(() => {
     const m = new Map<string, string>();
-    for (const row of deferredRows) m.set(row.item, row.spec);
+    for (const row of deferredRows) m.set(row.rowId, row.spec);
     return m;
   }, [deferredRows]);
 
   const diagramText = useMemo(() => {
-    const api = (specMap.get("API 정의") || "").split("\n").filter(Boolean);
-    const state = specMap.get("상태 모델") || "input -> generating -> draft -> user_edit -> review_requested -> published";
+    const api = (specMap.get("api_definition") || "").split("\n").filter(Boolean);
+    const state = specMap.get("state_model") || "input -> generating -> draft -> user_edit -> review_requested -> published";
     const states = state
       .split(/->|→/)
       .map((s) => s.trim())
       .filter(Boolean);
-    const storage = specMap.get("저장 구조") || "posts / post_drafts";
-    const logs = specMap.get("로그 구조") || "logs";
-    const fallback = specMap.get("Fallback 조건") || "retry -> failed";
-    const monitor = specMap.get("모니터링 항목") || "오류율/응답시간/사용자 수정률";
-    const execution = specMap.get("실행 구조") || "초안 생성 동기 처리 / 게시 승인 비동기 처리";
-    const inputSchema = specMap.get("입력 스키마") || "topic, platform, tone";
-    const outputSchema = specMap.get("출력 스키마") || "draft_text, confidence";
-    const guardrail = specMap.get("Guardrail 정책") || "confidence < 0.7 경고 + 정책 필터";
-    const model = specMap.get("모델 조건") || "기본 모델 + 조건부 상위 모델";
+    const storage = specMap.get("storage_structure") || "posts / post_drafts";
+    const logs = specMap.get("log_structure") || "logs";
+    const fallback = specMap.get("fallback_conditions") || "retry -> failed";
+    const monitor = specMap.get("monitoring_items") || "오류율/응답시간/사용자 수정률";
+    const execution = specMap.get("execution_structure") || "초안 생성 동기 처리 / 게시 승인 비동기 처리";
+    const inputSchema = specMap.get("input_schema") || "topic, platform, tone";
+    const outputSchema = specMap.get("output_schema") || "draft_text, confidence";
+    const guardrail = specMap.get("guardrail_policy") || "confidence < 0.7 경고 + 정책 필터";
+    const model = specMap.get("model_conditions") || "기본 모델 + 조건부 상위 모델";
 
     if (diagramTab === "state") {
       const safeStates = states.length > 0 ? states : ["input", "generating", "draft", "publish", "failed"];
@@ -302,6 +284,11 @@ export default function TechSpecPage() {
     ].join("\n");
   }, [diagramTab, specMap]);
 
+  const selectedRow = useMemo(
+    () => rows.find((row) => row.rowId === selectedRowId) ?? TECH_SPEC_ROW_DEFS.find((row) => row.rowId === selectedRowId),
+    [rows, selectedRowId]
+  );
+
   useEffect(() => {
     if (!isResizing) return;
     function onMove(e: MouseEvent) {
@@ -326,6 +313,9 @@ export default function TechSpecPage() {
     <div ref={twoPaneRef} className="two-pane" style={twoPaneStyle}>
       <section style={mainPanelStyle}>
         <h1 style={titleStyle}>STEP 4 기술 스펙</h1>
+        <div style={policyMeaningStyle}>
+          auto_approved = 초안 내부 저장 승인(배포 아님) · publish 승인 = 외부 반영 승인(휴먼 필수)
+        </div>
 
         {locked && (
           <div style={lockStyle}>
@@ -341,16 +331,19 @@ export default function TechSpecPage() {
               <div style={cellNoteStyle}>비고</div>
             </div>
             {rows.map((row, rowIdx) => {
-              const linkedTabs = ROW_DIAGRAM_LINKS[row.item] ?? [];
+              const linkedTabs = row.relatedTabs;
               const isRelated = linkedTabs.includes(diagramTab);
-              const isDraggingThis = dragIndex !== null && rows[dragIndex]?.item === row.item;
+              const isDraggingThis = dragIndex !== null && rows[dragIndex]?.rowId === row.rowId;
+              const isSelected = selectedRowId === row.rowId;
               return (
                 <div
-                  key={row.item}
+                  key={row.rowId}
+                  onClick={() => setSelectedRowId(row.rowId)}
                   style={{
                     ...rowStyle,
-                    background: isDraggingThis ? "#f8fafc" : isRelated ? "#f8fbff" : undefined,
+                    background: isDraggingThis ? "#f8fafc" : isRelated ? "#f8fbff" : isSelected ? "#f8fafc" : undefined,
                     boxShadow: isRelated ? "inset 3px 0 0 #60a5fa" : undefined,
+                    outline: isSelected ? "1px solid #93c5fd" : undefined,
                     borderTop:
                       dropIndex !== null && dropIndex === rowIdx && dropPosition === "before"
                         ? "2px solid #3b82f6"
@@ -397,12 +390,12 @@ export default function TechSpecPage() {
                     ⋮⋮
                   </button>
                   <div style={{ display: "grid", gap: 6 }}>
-                    <div style={{ color: isRelated ? "#0f172a" : undefined }}>{row.item}</div>
+                    <div style={{ color: isRelated ? "#0f172a" : undefined }}>{row.title}</div>
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      {(ROW_DIAGRAM_LINKS[row.item] ?? []).map((tab) => {
+                      {row.relatedTabs.map((tab) => {
                         const meta = DIAGRAM_TAB_META[tab];
                         return (
-                          <span key={`${row.item}-${tab}`} style={{ ...linkBadgeStyle, background: meta.bg, color: meta.fg, borderColor: meta.border }}>
+                          <span key={`${row.rowId}-${tab}`} style={{ ...linkBadgeStyle, background: meta.bg, color: meta.fg, borderColor: meta.border }}>
                             {meta.label}
                           </span>
                         );
@@ -413,14 +406,14 @@ export default function TechSpecPage() {
                 <div style={cellSpecStyle}>
                   <textarea
                     value={row.spec}
-                    onChange={(e) => updateRow(row.item, "spec", e.target.value)}
+                    onChange={(e) => updateRow(row.rowId, "spec", e.target.value)}
                     style={cellInputStyle}
                   />
                 </div>
                 <div style={cellNoteStyle}>
                   <textarea
                     value={row.note}
-                    onChange={(e) => updateRow(row.item, "note", e.target.value)}
+                    onChange={(e) => updateRow(row.rowId, "note", e.target.value)}
                     style={cellInputStyle}
                   />
                 </div>
@@ -461,6 +454,34 @@ export default function TechSpecPage() {
             </button>
           ))}
         </div>
+        {selectedRow && (
+          <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
+            <div style={{ fontSize: 12, color: "#6b7280" }}>선택 행</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", marginTop: 2 }}>{selectedRow.title}</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+              {selectedRow.relatedTabs.map((tab) => {
+                const meta = DIAGRAM_TAB_META[tab];
+                return (
+                  <button
+                    key={`suggest-${selectedRow.rowId}-${tab}`}
+                    type="button"
+                    onClick={() => setDiagramTab(tab)}
+                    style={{
+                      ...tabButtonStyle,
+                      background: tab === diagramTab ? meta.fg : meta.bg,
+                      color: tab === diagramTab ? "#fff" : meta.fg,
+                      borderColor: meta.border,
+                      padding: "3px 8px",
+                      fontSize: 11,
+                    }}
+                  >
+                    추천: {meta.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {diagramTab === "sequence" ? (
           <SequenceDiagramView source={diagramText} />
         ) : (
@@ -542,6 +563,17 @@ const lockStyle: CSSProperties = {
   background: "#fff1f2",
   marginTop: 10,
   marginBottom: 10,
+  fontWeight: 700,
+};
+
+const policyMeaningStyle: CSSProperties = {
+  marginTop: 8,
+  border: "1px solid #bfdbfe",
+  borderRadius: 8,
+  padding: "8px 10px",
+  background: "#eff6ff",
+  color: "#1e3a8a",
+  fontSize: 12,
   fontWeight: 700,
 };
 

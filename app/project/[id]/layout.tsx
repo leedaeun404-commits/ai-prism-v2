@@ -11,6 +11,7 @@ import {
   canAccessTechSpec,
   getHistory,
   getProgress,
+  HISTORY_EVENT_TYPES,
   type HistoryEvent,
   type ProjectProgress,
 } from "@/lib/prismMvp";
@@ -79,8 +80,8 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
     }
     addHistoryEvent(id, {
       stage: "system",
-      action: "manual_memo",
-      summary: text,
+      action: HISTORY_EVENT_TYPES.MANUAL_MEMO,
+      detail: text,
     });
     setMemoText("");
     setMemoMessage("메모가 타임라인에 저장되었습니다.");
@@ -179,7 +180,7 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
               {timeline.map((event) => (
                 <article key={event.id} style={memoTimelineCardStyle}>
                   <div style={{ fontWeight: 700, color: "#1f2937", fontSize: 14 }}>
-                    {event.action === "manual_memo" ? "수동 메모" : `자동 · ${event.stage.toUpperCase()} ${event.action}`}
+                    {event.action === HISTORY_EVENT_TYPES.MANUAL_MEMO ? "수동 메모" : `자동 · ${event.stage.toUpperCase()} ${event.action}`}
                   </div>
                   <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>{formatTs(event.ts)}</div>
                   <p style={{ margin: "8px 0 0", whiteSpace: "pre-wrap", fontSize: 13, color: "#111827" }}>{event.summary}</p>

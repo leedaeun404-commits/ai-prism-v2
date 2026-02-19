@@ -7,6 +7,7 @@ import {
   addHistoryEvent,
   canFreezeStep1,
   generateStep2Data,
+  HISTORY_EVENT_TYPES,
   getDefaultStep1,
   getGoStopResult,
   getMissingStep1RequiredFields,
@@ -47,8 +48,13 @@ export default function ScreeningPage() {
     setStep2Data(id, generateStep2Data(data));
     addHistoryEvent(id, {
       stage: "step1",
-      action: "save",
-      summary: "STEP1 저장 및 STEP2 초안 자동 갱신",
+      action: HISTORY_EVENT_TYPES.SAVE_STEP1,
+      detail: "STEP1 저장",
+    });
+    addHistoryEvent(id, {
+      stage: "step2",
+      action: HISTORY_EVENT_TYPES.GENERATE_STEP2_DRAFT,
+      detail: "STEP1 저장으로 STEP2 초안 자동 갱신",
     });
     setMessage("STEP1 저장 완료 (STEP2 초안 자동 갱신)");
   }
@@ -63,8 +69,8 @@ export default function ScreeningPage() {
     setProgress(id, { step1Frozen: true });
     addHistoryEvent(id, {
       stage: "step1",
-      action: "freeze",
-      summary: "STEP1 Freeze 완료",
+      action: HISTORY_EVENT_TYPES.FREEZE_STEP1,
+      detail: "STEP1 Freeze 완료",
     });
     setFrozen(true);
     setMessage("STEP1 Freeze 완료 (수정 잠금)");
@@ -73,6 +79,11 @@ export default function ScreeningPage() {
   function handleGenerateStep2Draft() {
     if (!id) return;
     setStep2Data(id, generateStep2Data(data));
+    addHistoryEvent(id, {
+      stage: "step2",
+      action: HISTORY_EVENT_TYPES.GENERATE_STEP2_DRAFT,
+      detail: "사용자 수동 실행으로 STEP2 초안 생성",
+    });
     setMessage("STEP2 설계 초안 생성 완료");
   }
 

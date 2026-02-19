@@ -7,6 +7,7 @@ import {
   addHistoryEvent,
   canAccessPolicy,
   canCompleteStep3,
+  HISTORY_EVENT_TYPES,
   getProgress,
   getStep1Data,
   getStep2Data,
@@ -93,13 +94,21 @@ export default function PolicyPage() {
       return;
     }
 
+    const progressBefore = getProgress(id);
     setStep3Policy(id, policy);
     setProgress(id, { step3Completed: true });
     addHistoryEvent(id, {
       stage: "step3",
-      action: "save",
-      summary: "STEP3 정책 저장(검토 완료)",
+      action: HISTORY_EVENT_TYPES.SAVE_STEP3,
+      detail: "STEP3 정책 저장(검토 완료)",
     });
+    if (!progressBefore.step3Completed) {
+      addHistoryEvent(id, {
+        stage: "step3",
+        action: HISTORY_EVENT_TYPES.COMPLETE_STEP3,
+        detail: "STEP3 완료 상태로 전환",
+      });
+    }
     setMessage("STEP3 저장 완료");
   }
 
@@ -114,6 +123,9 @@ export default function PolicyPage() {
         {locked && <div style={lockStyle}>🔒 STEP2 저장 완료 전에는 접근할 수 없습니다.</div>}
 
         <p style={subtleStyle}>STEP2 검토 결과를 기반으로 정책 초안이 자동 생성됩니다.</p>
+        <div style={policyMeaningStyle}>
+          auto_approved = 초안 내부 저장 승인(배포 아님) · publish 승인 = 외부 반영 승인(휴먼 필수)
+        </div>
 
         {policy && (
           <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
@@ -255,5 +267,16 @@ const lockStyle: CSSProperties = {
   background: "#fff1f2",
   marginTop: 10,
   marginBottom: 10,
+  fontWeight: 700,
+};
+
+const policyMeaningStyle: CSSProperties = {
+  marginTop: 8,
+  border: "1px solid #bfdbfe",
+  borderRadius: 8,
+  padding: "8px 10px",
+  background: "#eff6ff",
+  color: "#1e3a8a",
+  fontSize: 12,
   fontWeight: 700,
 };

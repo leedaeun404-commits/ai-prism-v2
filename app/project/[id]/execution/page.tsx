@@ -9,6 +9,7 @@ import {
   canAccessExecution,
   generateStep3Policy,
   generateStep2Data,
+  HISTORY_EVENT_TYPES,
   getDefaultPolicy,
   getProgress,
   getStep1Data,
@@ -120,12 +121,25 @@ export default function ExecutionPage() {
         mergedStep3[key] = generatedStep3[key];
       }
     }
+    const progressBefore = getProgress(id);
     setStep3Policy(id, mergedStep3);
     setProgress(id, { step2Completed: true });
     addHistoryEvent(id, {
       stage: "step2",
-      action: "save",
-      summary: "STEP2 설계 초안 저장(검토 완료)",
+      action: HISTORY_EVENT_TYPES.SAVE_STEP2,
+      detail: "STEP2 설계 초안 저장(검토 완료)",
+    });
+    if (!progressBefore.step2Completed) {
+      addHistoryEvent(id, {
+        stage: "step2",
+        action: HISTORY_EVENT_TYPES.COMPLETE_STEP2,
+        detail: "STEP2 완료 상태로 전환",
+      });
+    }
+    addHistoryEvent(id, {
+      stage: "step3",
+      action: HISTORY_EVENT_TYPES.GENERATE_STEP3_POLICY,
+      detail: "STEP2 저장을 기반으로 STEP3 정책 초안 자동 생성/병합",
     });
     setMessage("STEP2 저장 완료");
   }
