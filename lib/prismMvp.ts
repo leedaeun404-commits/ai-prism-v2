@@ -19,7 +19,7 @@ export type Step1Reversibility = "easy" | "limited" | "irreversible";
 export type Step1Impact = "low" | "medium" | "high";
 export type Step1Hitl = "pre_review" | "post_monitoring" | "none";
 export type Step1AiMinRole = "draft_only" | "auto_publish";
-export type Step1AiTaskType = "input_structuring" | "draft_generation" | "candidate_suggestion" | "approval_assist" | "auto_execution" | "no_intervention";
+export type Step1AiTaskType = "classification" | "draft_generation" | "candidate_suggestion" | "approval_assist" | "revision_suggestion" | "policy_check";
 export type Step1FinalExecutor = "human" | "conditional" | "automatic";
 
 export type Step1Data = {
@@ -240,7 +240,7 @@ const step1Schema = z.object({
     "cancelled",
     "",
   ]),
-  ai_task_types: z.array(z.enum(["input_structuring", "draft_generation", "candidate_suggestion", "approval_assist", "auto_execution", "no_intervention"])),
+  ai_task_types: z.array(z.enum(["classification", "draft_generation", "candidate_suggestion", "approval_assist", "revision_suggestion", "policy_check"])),
   final_executor: z.enum(["human", "conditional", "automatic", ""]),
   ai_min_role: z.enum(["draft_only", "auto_publish", ""]),
   kpi: z.string(),
@@ -384,22 +384,24 @@ function asStep1NoAiAlternative(value: unknown): Step1NoAiAlternative | undefine
 
 function asStep1AiTaskType(value: unknown): Step1AiTaskType | undefined {
   if (
-    value === "input_structuring" ||
+    value === "classification" ||
     value === "draft_generation" ||
     value === "candidate_suggestion" ||
     value === "approval_assist" ||
-    value === "auto_execution" ||
-    value === "no_intervention"
+    value === "revision_suggestion" ||
+    value === "policy_check"
   ) {
     return value;
   }
 
   // Legacy AI task type migration
-  if (value === "classification") return "input_structuring";
-  if (value === "summarization") return "input_structuring";
+  if (value === "input_structuring") return "classification";
+  if (value === "summarization") return "revision_suggestion";
   if (value === "recommendation") return "candidate_suggestion";
-  if (value === "detection") return "candidate_suggestion";
+  if (value === "detection") return "policy_check";
+  if (value === "auto_execution") return "revision_suggestion";
   if (value === "assistive_judgment") return "approval_assist";
+  if (value === "no_intervention") return "policy_check";
 
   return undefined;
 }

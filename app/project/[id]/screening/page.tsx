@@ -54,9 +54,9 @@ const AI_MIN_ROLE_OPTIONS: Array<{ value: Step1AiMinRole; label: string }> = [
 const AI_TASK_TYPE_OPTIONS: Array<{ value: Step1AiTaskType; label: string }> = [
   { value: "draft_generation", label: "초안 생성" },
   { value: "candidate_suggestion", label: "후보 제시" },
-  { value: "auto_execution", label: "개선 제안" },
-  { value: "no_intervention", label: "정책 점검" },
-  { value: "input_structuring", label: "분류" },
+  { value: "revision_suggestion", label: "개선 제안" },
+  { value: "policy_check", label: "정책 점검" },
+  { value: "classification", label: "분류" },
   { value: "approval_assist", label: "승인 보조" },
 ];
 
@@ -74,7 +74,7 @@ const REVERSIBILITY_OPTIONS: Array<{ value: Step1Reversibility; label: string }>
 
 const IMPACT_OPTIONS: Array<{ value: Step1Impact; label: string }> = [
   { value: "low", label: "내부 업무 불편" },
-  { value: "medium", label: "고객 혼선" },
+  { value: "medium", label: "고객 경험" },
   { value: "high", label: "금전·법적·브랜드 영향" },
 ];
 
@@ -98,7 +98,7 @@ const REVERSIBILITY_LABEL: Record<Step1Reversibility, string> = {
 
 const IMPACT_LABEL: Record<Step1Impact, string> = {
   low: "내부 업무 불편",
-  medium: "고객 혼선",
+  medium: "고객 경험",
   high: "금전/법적/브랜드 영향",
 };
 
@@ -173,7 +173,7 @@ const PREVIEW_AREA_META: Record<
     bg: "#f3e8ff",
     fg: "#6b21a8",
     border: "#d8b4fe",
-    rowIds: ["ai_task_types", "exposure", "impact", "hitl"],
+    rowIds: ["ai_task_types", "result_state", "exposure", "impact", "hitl"],
   },
   state_flow: {
     label: "상태 모델",
@@ -219,6 +219,7 @@ const EXPOSURE_LABEL_BY_VALUE: Record<Step1Exposure, string> = Object.fromEntrie
 const REVERSIBILITY_LABEL_BY_VALUE: Record<Step1Reversibility, string> = Object.fromEntries(REVERSIBILITY_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1Reversibility, string>;
 const IMPACT_LABEL_BY_VALUE: Record<Step1Impact, string> = Object.fromEntries(IMPACT_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1Impact, string>;
 const HITL_LABEL_BY_VALUE: Record<Step1Hitl, string> = Object.fromEntries(HITL_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1Hitl, string>;
+const AI_TASK_TYPE_VALUE_SET = new Set<Step1AiTaskType>(AI_TASK_TYPE_OPTIONS.map((o) => o.value));
 
 function normalizeTokens(raw: string): string[] {
   return raw
@@ -294,7 +295,7 @@ function getValueExampleByRowId(rowId: Step1TableRowId): string {
     case "reversibility":
       return "ex) 언제든 수정·중단 가능";
     case "impact":
-      return "ex) 고객 혼선";
+      return "ex) 고객 경험";
     case "hitl":
       return "ex) 사람이 먼저 보고 결정";
     case "kpi":
@@ -305,12 +306,13 @@ function getValueExampleByRowId(rowId: Step1TableRowId): string {
 }
 
 function buildStep1TableRows(data: Step1Data): Step1TableRow[] {
+  const normalizedAiTaskTypes = data.ai_task_types.filter((v): v is Step1AiTaskType => AI_TASK_TYPE_VALUE_SET.has(v));
   return [
     { id: "why", section: "전략", field: "왜 AI를 붙이나요", note: "", value: data.why },
     { id: "target", section: "전략", field: "누구를 위한 기능인가요", note: "", value: data.target[0] ? TARGET_LABEL_BY_VALUE[data.target[0]] : "" },
     { id: "as_is", section: "문제", field: "현재 어떤 문제가 있나요 (AS-IS)", note: "", value: data.as_is },
     { id: "result_state", section: "결과", field: "이 플로우가 끝나면 무엇이 남나요 (결과 상태)", note: "", value: data.result_state ? RESULT_LABEL_BY_VALUE[data.result_state] : "" },
-    { id: "ai_task_types", section: "전략", field: "AI는 무엇을 하나요 (작업 유형)", note: "", value: data.ai_task_types.map((v) => AI_TASK_TYPE_LABEL_BY_VALUE[v]).join(", ") },
+    { id: "ai_task_types", section: "전략", field: "AI는 무엇을 하나요 (작업 유형)", note: "", value: normalizedAiTaskTypes.map((v) => AI_TASK_TYPE_LABEL_BY_VALUE[v]).join(", ") },
     { id: "no_ai_alternative", section: "대안", field: "AI 없이 대안 1줄", note: "", value: data.no_ai_alternative_detail },
     { id: "exposure", section: "운영", field: "AI 결과가 외부에 공개되나요 (Exposure)", note: "", value: data.exposure ? EXPOSURE_LABEL_BY_VALUE[data.exposure] : "" },
     { id: "reversibility", section: "운영", field: "문제가 생기면 되돌릴 수 있나요 (Reversibility)", note: "", value: data.reversibility ? REVERSIBILITY_LABEL_BY_VALUE[data.reversibility] : "" },
@@ -398,35 +400,74 @@ export default function ScreeningPage() {
     setSavedNotesSnapshot(loadedNotes);
   }, [id]);
 
+  useEffect(() => {
+    if (!id) return;
+    const normalized = data.ai_task_types.filter((v): v is Step1AiTaskType => AI_TASK_TYPE_VALUE_SET.has(v));
+    if (normalized.length === data.ai_task_types.length) return;
+    setData((prev) => ({ ...prev, ai_task_types: normalized }));
+    addHistoryEvent(id, {
+      stage: "system",
+      action: HISTORY_EVENT_TYPES.SCHEMA_INVALID_RECOVERED,
+      detail: "step1 ai_task_types invalid values dropped",
+    });
+  }, [id, data.ai_task_types]);
+
   const riskLevel = useMemo(() => computeRisk(data), [data]);
   const freezeReady = canFreezeStep1(data);
   const missingForFreeze = useMemo(() => getMissingStep1RequiredFields(data), [data]);
 
-  const hasAutomationInputs = data.ai_task_types.length > 0 || Boolean(data.result_state) || Boolean(data.hitl) || Boolean(data.impact) || Boolean(data.exposure);
-  const wantsAutoExecution = data.ai_task_types.includes("auto_execution") || data.result_state === "published_or_executed";
-  const autoDraft = data.ai_task_types.includes("draft_generation") || data.result_state === "draft_saved";
-  const autoPublish = wantsAutoExecution && data.exposure !== "public" && data.impact !== "high" && data.hitl !== "pre_review";
+  const aiRoleSummary =
+    data.ai_task_types.filter((v): v is Step1AiTaskType => AI_TASK_TYPE_VALUE_SET.has(v)).length > 0
+      ? Array.from(new Set(data.ai_task_types.filter((v): v is Step1AiTaskType => AI_TASK_TYPE_VALUE_SET.has(v))))
+          .map((v) => `${AI_TASK_TYPE_LABEL_BY_VALUE[v]} (ai_task_type=${v})`)
+          .join("\n")
+      : "—";
+  const humanReviewSummary = data.hitl ? `${HITL_LABEL[data.hitl]} (hitl=${data.hitl})` : "—";
+
+  const executionAuthoritySummary = useMemo(() => {
+    if (!data.result_state) return "—";
+    return `${RESULT_LABEL_BY_VALUE[data.result_state]} (result_state=${data.result_state})`;
+  }, [data.result_state]);
+
+  const conditionalDelegationSummary = useMemo(() => {
+    let label = "조건부 자동 적용 (conditional_handling=conditional_apply)";
+    if (data.hitl === "pre_review") {
+      label = "사전 검토 후 적용 (conditional_handling=pre_review_then_apply)";
+    } else if (data.hitl === "post_monitoring") {
+      label = "적용 후 모니터링 (conditional_handling=post_monitoring)";
+    } else if (data.hitl === "none" && data.exposure === "internal" && data.impact && data.impact !== "high") {
+      label = "자동 적용 (conditional_handling=auto_apply)";
+    }
+    const signal = `입력: impact=${data.impact || "-"}, exposure=${data.exposure || "-"}, hitl=${data.hitl || "-"}`;
+    return `${label}\n${signal}`;
+  }, [data.exposure, data.impact, data.hitl]);
+
   const manualReviewRequired = data.result_state === "review_requested" || data.impact === "high" || data.hitl === "pre_review";
-  const conditionalAutoApprove = wantsAutoExecution && data.hitl === "post_monitoring" && data.impact !== "high";
-  const autoDraftStatus = hasAutomationInputs ? (autoDraft ? "활성화 (ENABLED)" : "비활성화 (DISABLED)") : "미선택 (UNSET)";
-  const autoPublishStatus = hasAutomationInputs ? (autoPublish ? "활성화 (ENABLED)" : "비활성화 (DISABLED)") : "미선택 (UNSET)";
-  const preReviewStatus = hasAutomationInputs ? (manualReviewRequired ? "필수 (REQUIRED)" : "없음 (NOT_REQUIRED)") : "미선택 (UNSET)";
-  const conditionalAutoApproveStatus = hasAutomationInputs ? (conditionalAutoApprove ? "허용 (ALLOWED)" : "불가 (NOT_ALLOWED)") : "미선택 (UNSET)";
   const stateFlow = manualReviewRequired
     ? ["input", "generating", "draft", "review_required", "approved", "publish"]
     : ["input", "generating", "draft", "approved", "publish"];
   const targetSummary = data.target.length > 0 ? data.target.map((v) => TARGET_LABEL_BY_VALUE[v]).join(", ") : "미선택";
-  const aiTaskTypesSummary = data.ai_task_types.length > 0
-    ? data.ai_task_types.map((v) => `${AI_TASK_TYPE_LABEL_BY_VALUE[v]} (${AI_TASK_TYPE_CODE_BY_VALUE[v]})`).join(", ")
-    : "미선택 (UNSET)";
   const resultStateSummary = data.result_state ? `${RESULT_LABEL_BY_VALUE[data.result_state]} (${RESULT_CODE_BY_VALUE[data.result_state]})` : "미선택 (UNSET)";
   const kpiSummary = data.kpi.trim() || "미입력";
-  const exposureSummary = data.exposure ? `${EXPOSURE_LABEL[data.exposure]} (${data.exposure.toUpperCase()})` : "미선택 (UNSET)";
+  const exposureSummary = data.exposure ? `${EXPOSURE_LABEL[data.exposure]} (exposure=${data.exposure})` : "미선택 (UNSET)";
   const reversibilitySummary = data.reversibility
-    ? `${REVERSIBILITY_LABEL[data.reversibility]} (${data.reversibility.toUpperCase()})`
+    ? `${REVERSIBILITY_LABEL[data.reversibility]} (reversibility=${data.reversibility})`
     : "미선택 (UNSET)";
-  const impactSummary = data.impact ? `${IMPACT_LABEL[data.impact]} (${data.impact.toUpperCase()})` : "미선택 (UNSET)";
-  const hitlSummary = data.hitl ? `${HITL_LABEL[data.hitl]} (${data.hitl.toUpperCase()})` : "미선택 (UNSET)";
+  const impactSummary = data.impact ? `${IMPACT_LABEL[data.impact]} (impact=${data.impact})` : "미선택 (UNSET)";
+  const hitlSummary = data.hitl ? `${HITL_LABEL[data.hitl]} (hitl=${data.hitl})` : "미선택 (UNSET)";
+
+  const impactAnchor = data.impact
+    ? `${IMPACT_LABEL[data.impact]} (impact=${data.impact})`
+    : "실패 비용 위치 입력 필요";
+  const exposureReference = data.exposure
+    ? `${EXPOSURE_LABEL_BY_VALUE[data.exposure]} (exposure=${data.exposure})`
+    : "";
+  const hitlReference = data.hitl
+    ? `${HITL_LABEL_BY_VALUE[data.hitl]} (hitl=${data.hitl})`
+    : "";
+  const reversibilityReference = data.reversibility
+    ? `${REVERSIBILITY_LABEL_BY_VALUE[data.reversibility]} (reversibility=${data.reversibility})`
+    : "";
   const riskReasons = [
     data.exposure
       ? data.exposure === "public"
@@ -450,6 +491,7 @@ export default function ScreeningPage() {
           : "되돌림 어려움 (Reversibility=IRREVERSIBLE)"
       : "되돌림 가능성 미선택",
   ];
+  const riskSignals = [exposureReference, hitlReference, reversibilityReference].filter(Boolean);
   const tableRows = useMemo(() => {
     const baseRows = buildStep1TableRows(data);
     const rowById = new Map(baseRows.map((row) => [row.id, row]));
@@ -1429,11 +1471,10 @@ export default function ScreeningPage() {
                 active={activePreviewArea === "automation"}
                 onClick={() => setActivePreviewArea("automation")}
               >
-                <PreviewItem label="AI 작업 유형 (AI Task Types)" value={aiTaskTypesSummary} />
-                <PreviewItem label="초안 자동 생성 (Draft Generation)" value={autoDraftStatus} />
-                <PreviewItem label="자동 게시 (Auto Publish)" value={autoPublishStatus} />
-                <PreviewItem label="사전 검토 단계 (Pre Review)" value={preReviewStatus} />
-                <PreviewItem label="조건부 자동 승인 (Conditional Auto Approve)" value={conditionalAutoApproveStatus} />
+                <PreviewItem label="AI 역할 (AI Role)" value={aiRoleSummary} />
+                <PreviewItem label="사람 개입 시점 (Human Review Model)" value={humanReviewSummary} />
+                <PreviewItem label="게시/적용 방식 (Execution Authority)" value={executionAuthoritySummary} />
+                <PreviewItem label="자동 처리 허용 여부 (Conditional Delegation)" value={conditionalDelegationSummary} />
               </PreviewSection>
 
               <PreviewSection
@@ -1463,11 +1504,11 @@ export default function ScreeningPage() {
                 active={activePreviewArea === "risk_profile"}
                 onClick={() => setActivePreviewArea("risk_profile")}
               >
-                <PreviewItem label="Calculated Risk Level" value={riskLevel.toUpperCase()} />
-                <div style={previewReasonStyle}>근거:</div>
+                <PreviewItem label="기준 항목 (Primary Anchor)" value={impactAnchor} />
+                <div style={previewReasonStyle}>참고 신호 (Context Signals)</div>
                 <ul style={previewReasonListStyle}>
-                  {riskReasons.map((reason) => (
-                    <li key={reason}>- {reason}</li>
+                  {riskSignals.map((signal) => (
+                    <li key={signal}>- {signal}</li>
                   ))}
                 </ul>
               </PreviewSection>
