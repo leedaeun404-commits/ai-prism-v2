@@ -162,7 +162,7 @@ const PREVIEW_AREA_META: Record<
     rowIds: ["why", "target", "result_state", "kpi"],
   },
   policy: {
-    label: "통제 지점",
+    label: "통제 포인트",
     bg: "#dcfce7",
     fg: "#166534",
     border: "#86efac",
@@ -193,8 +193,6 @@ const PREVIEW_AREA_META: Record<
 
 function getSingleSelectOptionsByRowId(rowId: Step1TableRowId) {
   switch (rowId) {
-    case "target":
-      return TARGET_OPTIONS;
     case "result_state":
       return RESULT_STATE_OPTIONS;
     case "exposure":
@@ -212,9 +210,7 @@ function getSingleSelectOptionsByRowId(rowId: Step1TableRowId) {
 
 const TARGET_LABEL_BY_VALUE: Record<Step1Target, string> = Object.fromEntries(TARGET_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1Target, string>;
 const AI_TASK_TYPE_LABEL_BY_VALUE: Record<Step1AiTaskType, string> = Object.fromEntries(AI_TASK_TYPE_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1AiTaskType, string>;
-const AI_TASK_TYPE_CODE_BY_VALUE: Record<Step1AiTaskType, string> = Object.fromEntries(AI_TASK_TYPE_OPTIONS.map((o) => [o.value, o.value.toUpperCase()])) as Record<Step1AiTaskType, string>;
 const RESULT_LABEL_BY_VALUE: Record<Step1ResultState, string> = Object.fromEntries(RESULT_STATE_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1ResultState, string>;
-const RESULT_CODE_BY_VALUE: Record<Step1ResultState, string> = Object.fromEntries(RESULT_STATE_OPTIONS.map((o) => [o.value, o.value])) as Record<Step1ResultState, string>;
 const EXPOSURE_LABEL_BY_VALUE: Record<Step1Exposure, string> = Object.fromEntries(EXPOSURE_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1Exposure, string>;
 const REVERSIBILITY_LABEL_BY_VALUE: Record<Step1Reversibility, string> = Object.fromEntries(REVERSIBILITY_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1Reversibility, string>;
 const IMPACT_LABEL_BY_VALUE: Record<Step1Impact, string> = Object.fromEntries(IMPACT_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1Impact, string>;
@@ -251,23 +247,30 @@ function parseMultiByOption<T extends string>(raw: string, options: Array<{ valu
   return Array.from(matched);
 }
 
-function parseTargetWithAlias(raw: string): Step1Target | "" {
-  const token = normalizeTokens(raw)[0]?.toLowerCase();
-  if (!token) return "";
+function parseTargetTokenWithAlias(rawToken: string): Step1Target | "" {
+  const token = rawToken.toLowerCase();
   const direct = parseSingleByOption(token, TARGET_OPTIONS);
   if (direct) return direct;
-
   if (token.includes("마케터") || token.includes("작성자") || token.includes("콘텐츠") || token.includes("내부")) return "internal_staff";
   if (token.includes("승인") || token.includes("관리자")) return "approver_admin";
   if (token.includes("일반") || token.includes("최종") || token.includes("end user")) return "end_user";
   if (token.includes("고객") || token.includes("파트너")) return "external_customer_partner";
   if (token.includes("시스템") || token.includes("운영자")) return "system_operator";
-
   return "";
 }
 
+function parseTargetsWithAlias(raw: string): Step1Target[] {
+  const tokens = normalizeTokens(raw);
+  if (tokens.length === 0) return [];
+  const matched = new Set<Step1Target>();
+  for (const token of tokens) {
+    const parsed = parseTargetTokenWithAlias(token);
+    if (parsed) matched.add(parsed);
+  }
+  return Array.from(matched);
+}
+
 function getSingleValueByRowId(rowId: Step1TableRowId, data: Step1Data): string {
-  if (rowId === "target") return data.target[0] ?? "";
   if (rowId === "result_state") return data.result_state;
   if (rowId === "exposure") return data.exposure;
   if (rowId === "reversibility") return data.reversibility;
@@ -309,7 +312,7 @@ function buildStep1TableRows(data: Step1Data): Step1TableRow[] {
   const normalizedAiTaskTypes = data.ai_task_types.filter((v): v is Step1AiTaskType => AI_TASK_TYPE_VALUE_SET.has(v));
   return [
     { id: "why", section: "전략", field: "왜 AI를 붙이나요", note: "", value: data.why },
-    { id: "target", section: "전략", field: "누구를 위한 기능인가요", note: "", value: data.target[0] ? TARGET_LABEL_BY_VALUE[data.target[0]] : "" },
+    { id: "target", section: "전략", field: "누구를 위한 기능인가요", note: "", value: data.target.map((v) => TARGET_LABEL_BY_VALUE[v]).join(", ") },
     { id: "as_is", section: "문제", field: "현재 어떤 문제가 있나요 (AS-IS)", note: "", value: data.as_is },
     { id: "result_state", section: "결과", field: "이 플로우가 끝나면 무엇이 남나요 (결과 상태)", note: "", value: data.result_state ? RESULT_LABEL_BY_VALUE[data.result_state] : "" },
     { id: "ai_task_types", section: "전략", field: "AI는 무엇을 하나요 (작업 유형)", note: "", value: normalizedAiTaskTypes.map((v) => AI_TASK_TYPE_LABEL_BY_VALUE[v]).join(", ") },
@@ -323,7 +326,7 @@ function buildStep1TableRows(data: Step1Data): Step1TableRow[] {
 }
 
 function getNotePlaceholderByRowId(rowId: Step1TableRowId): string {
-  if (rowId === "target" || rowId === "ai_task_types") return "폼 모드에서 복수 선택 가능";
+  if (rowId === "target" || rowId === "ai_task_types") return "복수 선택 가능";
   return "";
 }
 
@@ -442,12 +445,27 @@ export default function ScreeningPage() {
     return `${label}\n${signal}`;
   }, [data.exposure, data.impact, data.hitl]);
 
-  const manualReviewRequired = data.result_state === "review_requested" || data.impact === "high" || data.hitl === "pre_review";
-  const stateFlow = manualReviewRequired
-    ? ["input", "generating", "draft", "review_required", "approved", "publish"]
-    : ["input", "generating", "draft", "approved", "publish"];
+  const stateFlow = useMemo(() => {
+    const steps: string[] = ["입력 (input)"];
+    if (data.ai_task_types.includes("draft_generation")) {
+      steps.push("AI 초안 생성 (draft_generation)");
+    }
+    if (data.hitl === "pre_review") {
+      steps.push("사전 검토 (pre_review)");
+    }
+    if (data.result_state) {
+      steps.push(`${RESULT_LABEL_BY_VALUE[data.result_state]} (${data.result_state})`);
+    }
+    return steps;
+  }, [data.ai_task_types, data.hitl, data.result_state]);
+  const stateFlowWarning = useMemo(() => {
+    if (data.result_state === "review_requested" && data.hitl && data.hitl !== "pre_review") {
+      return "현재 실행 방식과 상태 흐름이 일치하지 않습니다.";
+    }
+    return "";
+  }, [data.result_state, data.hitl]);
   const targetSummary = data.target.length > 0 ? data.target.map((v) => TARGET_LABEL_BY_VALUE[v]).join(", ") : "미선택";
-  const resultStateSummary = data.result_state ? `${RESULT_LABEL_BY_VALUE[data.result_state]} (${RESULT_CODE_BY_VALUE[data.result_state]})` : "미선택 (UNSET)";
+  const resultStateSummary = data.result_state ? `${RESULT_LABEL_BY_VALUE[data.result_state]} (result_state=${data.result_state})` : "미선택 (UNSET)";
   const kpiSummary = data.kpi.trim() || "미입력";
   const exposureSummary = data.exposure ? `${EXPOSURE_LABEL[data.exposure]} (exposure=${data.exposure})` : "미선택 (UNSET)";
   const reversibilitySummary = data.reversibility
@@ -578,10 +596,7 @@ export default function ScreeningPage() {
         case "target":
           return {
             ...prev,
-            target: (() => {
-              const single = parseTargetWithAlias(rawValue);
-              return single ? [single] : [];
-            })(),
+            target: parseTargetsWithAlias(rawValue),
           };
         case "as_is":
           return { ...prev, as_is: rawValue };
@@ -990,20 +1005,24 @@ export default function ScreeningPage() {
   }
 
   function handleFreeze() {
-    if (!id || frozen) return;
+    if (!id) return;
     if (!freezeReady) {
       setMessage(`확정 불가: 필수 항목 ${missingForFreeze.length}개를 채워주세요.`);
       return;
     }
     setStep1Data(id, data);
+    setStep2Data(id, generateStep2Data(data));
     setProgress(id, { step1Frozen: true });
     addHistoryEvent(id, {
       stage: "step1",
       action: HISTORY_EVENT_TYPES.FREEZE_STEP1,
-      detail: "STEP1 확정 완료",
+      detail: frozen ? "STEP1 재확정 완료" : "STEP1 확정 완료",
     });
+    setSavedDataSnapshot(data);
+    setSavedNotesSnapshot(tableNotes);
+    setSavedRowOrderSnapshot(rowOrder);
     setFrozen(true);
-    setMessage("STEP1 확정 완료 (수정 잠금)");
+    setMessage(frozen ? "STEP1 재확정 완료 (변경 반영)" : "STEP1 확정 완료 (다음 단계 열림)");
   }
 
   return (
@@ -1052,10 +1071,9 @@ export default function ScreeningPage() {
             >
               저장
             </button>
-            <button onClick={handleFreeze} disabled={frozen || !freezeReady} style={buttonStyle}>
+            <button onClick={handleFreeze} disabled={!freezeReady || (frozen && !isDirty)} style={buttonStyle}>
               확정하기
             </button>
-            {frozen && <span style={{ ...subtleStyle, alignSelf: "center" }}>🔒 확정됨(수정 가능)</span>}
           </div>
         </div>
 
@@ -1242,7 +1260,7 @@ export default function ScreeningPage() {
                   onMouseEnter={() => extendCellSelection(rowIndex, 1)}
                 >
                   {editingRowId === row.id ? (
-                    row.id === "ai_task_types" ? (
+                    row.id === "ai_task_types" || row.id === "target" ? (
                       <div style={sheetDropdownWrapStyle}>
                         <button
                           type="button"
@@ -1268,19 +1286,30 @@ export default function ScreeningPage() {
                           </svg>
                         </button>
                         <div style={sheetDropdownMenuStyle} onMouseDown={(e) => e.stopPropagation()}>
-                          {AI_TASK_TYPE_OPTIONS.map((option) => {
-                            const checked = data.ai_task_types.includes(option.value);
+                          {(row.id === "target" ? TARGET_OPTIONS : AI_TASK_TYPE_OPTIONS).map((option) => {
+                            const checked = row.id === "target"
+                              ? data.target.includes(option.value as Step1Target)
+                              : data.ai_task_types.includes(option.value as Step1AiTaskType);
                             return (
                               <label key={option.value} style={sheetMultiOptionItemStyle}>
                                 <input
                                   type="checkbox"
                                   checked={checked}
                                   onChange={() => {
+                                    if (row.id === "target") {
+                                      update(
+                                        "target",
+                                        checked
+                                          ? data.target.filter((v) => v !== (option.value as Step1Target))
+                                          : [...data.target, option.value as Step1Target]
+                                      );
+                                      return;
+                                    }
                                     update(
                                       "ai_task_types",
                                       checked
-                                        ? data.ai_task_types.filter((v) => v !== option.value)
-                                        : [...data.ai_task_types, option.value]
+                                        ? data.ai_task_types.filter((v) => v !== (option.value as Step1AiTaskType))
+                                        : [...data.ai_task_types, option.value as Step1AiTaskType]
                                     );
                                   }}
                                 />
@@ -1380,7 +1409,7 @@ export default function ScreeningPage() {
                       }}
                       title="더블클릭 또는 Enter로 편집"
                     >
-                      {getSingleSelectOptionsByRowId(row.id) || row.id === "ai_task_types" ? (
+                      {getSingleSelectOptionsByRowId(row.id) || row.id === "ai_task_types" || row.id === "target" ? (
                         <div style={sheetValueSelectDisplayStyle}>
                           <span style={row.value ? undefined : sheetValuePlaceholderStyle}>{row.value || "선택"}</span>
                           <svg viewBox="0 0 20 20" aria-hidden="true" style={sheetDropdownChevronStyle}>
@@ -1466,6 +1495,18 @@ export default function ScreeningPage() {
             <p style={{ ...subtleStyle, marginTop: 8 }}>입력값이 구조로 실시간 반영됩니다.</p>
             <div style={previewFrameStyle}>
               <PreviewSection
+                title="기획 의도"
+                badge={PREVIEW_AREA_META.strategy}
+                active={activePreviewArea === "strategy"}
+                onClick={() => setActivePreviewArea("strategy")}
+              >
+                <PreviewItem label="목적 (Purpose)" value={data.why.trim() || "미입력"} />
+                <PreviewItem label="대상 사용자 (Target)" value={targetSummary} />
+                <PreviewItem label="결과 상태 (Result State)" value={resultStateSummary} />
+                <PreviewItem label="성공 가설 (KPI Hypothesis)" value={kpiSummary} />
+              </PreviewSection>
+
+              <PreviewSection
                 title="실행 방식"
                 badge={PREVIEW_AREA_META.automation}
                 active={activePreviewArea === "automation"}
@@ -1478,16 +1519,17 @@ export default function ScreeningPage() {
               </PreviewSection>
 
               <PreviewSection
-                title="상태 모델"
+                title="처리 플로우"
                 badge={PREVIEW_AREA_META.state_flow}
                 active={activePreviewArea === "state_flow"}
                 onClick={() => setActivePreviewArea("state_flow")}
               >
                 <div style={previewFlowStyle}>{stateFlow.map((node) => (node === stateFlow[0] ? node : `-> ${node}`)).join("\n")}</div>
+                {stateFlowWarning && <div style={{ ...subtleStyle, color: "#b45309" }}>{stateFlowWarning}</div>}
               </PreviewSection>
 
               <PreviewSection
-                title="통제 지점"
+                title="통제 포인트"
                 badge={PREVIEW_AREA_META.policy}
                 active={activePreviewArea === "policy"}
                 onClick={() => setActivePreviewArea("policy")}
@@ -1503,6 +1545,7 @@ export default function ScreeningPage() {
                 badge={PREVIEW_AREA_META.risk_profile}
                 active={activePreviewArea === "risk_profile"}
                 onClick={() => setActivePreviewArea("risk_profile")}
+                isLast
               >
                 <PreviewItem label="기준 항목 (Primary Anchor)" value={impactAnchor} />
                 <div style={previewReasonStyle}>참고 신호 (Context Signals)</div>
@@ -1511,19 +1554,6 @@ export default function ScreeningPage() {
                     <li key={signal}>- {signal}</li>
                   ))}
                 </ul>
-              </PreviewSection>
-
-              <PreviewSection
-                title="기획 의도"
-                badge={PREVIEW_AREA_META.strategy}
-                active={activePreviewArea === "strategy"}
-                onClick={() => setActivePreviewArea("strategy")}
-                isLast
-              >
-                <PreviewItem label="목적 (Purpose)" value={data.why.trim() || "미입력"} />
-                <PreviewItem label="대상 사용자 (Target)" value={targetSummary} />
-                <PreviewItem label="결과 상태 (Result State)" value={resultStateSummary} />
-                <PreviewItem label="성공 가설 (KPI Hypothesis)" value={kpiSummary} />
               </PreviewSection>
             </div>
           </>
