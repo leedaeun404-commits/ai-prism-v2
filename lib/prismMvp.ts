@@ -1,14 +1,26 @@
 import { z } from "zod";
 
 export type RiskLevel = "low" | "medium" | "high";
-export type Step1Target = "internal_operator" | "content_writer" | "admin" | "general_user" | "customer";
-export type Step1ResultState = "draft" | "status_change" | "external_publish" | "internal_reference";
+export type Step1Target = "internal_staff" | "approver_admin" | "end_user" | "external_customer_partner" | "system_operator";
+export type Step1ResultState =
+  | "draft_saved"
+  | "status_changed"
+  | "review_requested"
+  | "published_or_executed"
+  | "reference_saved"
+  | "action_triggered"
+  | "task_created"
+  | "ephemeral_response"
+  | "failed"
+  | "cancelled";
 export type Step1NoAiAlternative = "manual" | "template" | "rule_based" | "search_based" | "other";
 export type Step1Exposure = "internal" | "limited_external" | "public";
 export type Step1Reversibility = "easy" | "limited" | "irreversible";
 export type Step1Impact = "low" | "medium" | "high";
 export type Step1Hitl = "pre_review" | "post_monitoring" | "none";
 export type Step1AiMinRole = "draft_only" | "auto_publish";
+export type Step1AiTaskType = "input_structuring" | "draft_generation" | "candidate_suggestion" | "approval_assist" | "auto_execution" | "no_intervention";
+export type Step1FinalExecutor = "human" | "conditional" | "automatic";
 
 export type Step1Data = {
   why: string;
@@ -16,6 +28,8 @@ export type Step1Data = {
   target_detail: string;
   as_is: string;
   result_state: Step1ResultState | "";
+  ai_task_types: Step1AiTaskType[];
+  final_executor: Step1FinalExecutor | "";
   ai_min_role: Step1AiMinRole | "";
   kpi: string;
   no_ai_alternative: Step1NoAiAlternative[];
@@ -210,10 +224,24 @@ const STEP3_REVIEW_KEYS = [
 
 const step1Schema = z.object({
   why: z.string(),
-  target: z.array(z.enum(["internal_operator", "content_writer", "admin", "general_user", "customer"])),
+  target: z.array(z.enum(["internal_staff", "approver_admin", "end_user", "external_customer_partner", "system_operator"])),
   target_detail: z.string(),
   as_is: z.string(),
-  result_state: z.enum(["draft", "status_change", "external_publish", "internal_reference", ""]),
+  result_state: z.enum([
+    "draft_saved",
+    "status_changed",
+    "review_requested",
+    "published_or_executed",
+    "reference_saved",
+    "action_triggered",
+    "task_created",
+    "ephemeral_response",
+    "failed",
+    "cancelled",
+    "",
+  ]),
+  ai_task_types: z.array(z.enum(["input_structuring", "draft_generation", "candidate_suggestion", "approval_assist", "auto_execution", "no_intervention"])),
+  final_executor: z.enum(["human", "conditional", "automatic", ""]),
   ai_min_role: z.enum(["draft_only", "auto_publish", ""]),
   kpi: z.string(),
   no_ai_alternative: z.array(z.enum(["manual", "template", "rule_based", "search_based", "other"])),
@@ -334,13 +362,18 @@ function asRiskLevel(value: unknown): RiskLevel | undefined {
 }
 
 function asStep1Target(value: unknown): Step1Target | undefined {
-  return value === "internal_operator" ||
-    value === "content_writer" ||
-    value === "admin" ||
-    value === "general_user" ||
-    value === "customer"
-    ? value
-    : undefined;
+  if (value === "internal_staff" || value === "approver_admin" || value === "end_user" || value === "external_customer_partner" || value === "system_operator") {
+    return value;
+  }
+
+  // Legacy target migration
+  if (value === "internal_operator") return "internal_staff";
+  if (value === "content_writer") return "internal_staff";
+  if (value === "admin") return "approver_admin";
+  if (value === "general_user") return "end_user";
+  if (value === "customer") return "external_customer_partner";
+
+  return undefined;
 }
 
 function asStep1NoAiAlternative(value: unknown): Step1NoAiAlternative | undefined {
@@ -349,10 +382,55 @@ function asStep1NoAiAlternative(value: unknown): Step1NoAiAlternative | undefine
     : undefined;
 }
 
+function asStep1AiTaskType(value: unknown): Step1AiTaskType | undefined {
+  if (
+    value === "input_structuring" ||
+    value === "draft_generation" ||
+    value === "candidate_suggestion" ||
+    value === "approval_assist" ||
+    value === "auto_execution" ||
+    value === "no_intervention"
+  ) {
+    return value;
+  }
+
+  // Legacy AI task type migration
+  if (value === "classification") return "input_structuring";
+  if (value === "summarization") return "input_structuring";
+  if (value === "recommendation") return "candidate_suggestion";
+  if (value === "detection") return "candidate_suggestion";
+  if (value === "assistive_judgment") return "approval_assist";
+
+  return undefined;
+}
+
+function asStep1FinalExecutor(value: unknown): Step1FinalExecutor | undefined {
+  return value === "human" || value === "conditional" || value === "automatic" ? value : undefined;
+}
+
 function asStep1ResultState(value: unknown): Step1ResultState | undefined {
-  return value === "draft" || value === "status_change" || value === "external_publish" || value === "internal_reference"
-    ? value
-    : undefined;
+  if (
+    value === "draft_saved" ||
+    value === "status_changed" ||
+    value === "review_requested" ||
+    value === "published_or_executed" ||
+    value === "reference_saved" ||
+    value === "action_triggered" ||
+    value === "task_created" ||
+    value === "ephemeral_response" ||
+    value === "failed" ||
+    value === "cancelled"
+  ) {
+    return value;
+  }
+
+  // Legacy result_state migration
+  if (value === "draft") return "draft_saved";
+  if (value === "status_change") return "status_changed";
+  if (value === "external_publish") return "published_or_executed";
+  if (value === "internal_reference") return "reference_saved";
+
+  return undefined;
 }
 
 function asStep1Exposure(value: unknown): Step1Exposure | undefined {
@@ -480,7 +558,7 @@ function buildHistoryEvent(projectId: string, event: Omit<HistoryEvent, "id" | "
 const HISTORY_DEFAULT_SUMMARY: Record<HistoryEventAction, string> = {
   SAVE_STEP1: "STEP1 저장",
   GENERATE_STEP2_DRAFT: "STEP2 초안 생성",
-  FREEZE_STEP1: "STEP1 Freeze 완료",
+  FREEZE_STEP1: "STEP1 확정 완료",
   SET_EXPOSURE: "노출 범위 변경",
   SET_REVERSIBILITY: "되돌림 가능성 변경",
   SET_IMPACT: "실패 비용 위치 변경",
@@ -522,7 +600,7 @@ function parseStep1(value: unknown): Partial<Step1Data> {
   const legacyTarget = asString(value.target_user);
   const target = targetFromArray.length > 0 ? targetFromArray : [];
   if (target.length === 0 && legacyTarget?.trim()) {
-    target.push("content_writer");
+    target.push("internal_staff");
   }
 
   const noAiFromArray = (asStringArray(value.no_ai_alternative) ?? [])
@@ -537,13 +615,20 @@ function parseStep1(value: unknown): Partial<Step1Data> {
   const legacyRisk = asRiskLevel(value.risk_level);
   const legacyAiMinRole = asString(value.ai_min_role);
   const legacyResultArtifact = asString(value.result_artifact);
+  const taskTypes = (asStringArray(value.ai_task_types) ?? [])
+    .map((v) => asStep1AiTaskType(v))
+    .filter((v): v is Step1AiTaskType => Boolean(v));
+  const finalExecutor = asStep1FinalExecutor(value.final_executor) ?? (legacyAiMinRole === "auto_publish" ? "automatic" : undefined);
+  const aiMinRole = asStep1AiMinRole(value.ai_min_role) ?? (finalExecutor === "automatic" ? "auto_publish" : legacyAiMinRole === "auto_publish" ? "auto_publish" : "draft_only");
   return {
     why: asString(value.why) ?? asString(value.why_ai),
     target,
     target_detail: asString(value.target_detail) ?? "",
     as_is: asString(value.as_is) ?? asString(value.as_is_problem),
-    result_state: asStep1ResultState(value.result_state) ?? (legacyResultArtifact?.trim() ? "draft" : undefined),
-    ai_min_role: asStep1AiMinRole(value.ai_min_role) ?? (legacyAiMinRole === "auto_publish" ? "auto_publish" : "draft_only"),
+    result_state: asStep1ResultState(value.result_state) ?? (legacyResultArtifact?.trim() ? "draft_saved" : undefined),
+    ai_task_types: taskTypes,
+    final_executor: finalExecutor ?? "",
+    ai_min_role: aiMinRole,
     kpi: asString(value.kpi) ?? asString(value.kpi_hypothesis),
     no_ai_alternative: noAiAlternatives,
     no_ai_alternative_detail: asString(value.no_ai_alternative_detail) ?? "",
@@ -665,6 +750,8 @@ export function getDefaultStep1(): Step1Data {
     target_detail: "",
     as_is: "",
     result_state: "",
+    ai_task_types: [],
+    final_executor: "",
     ai_min_role: "",
     kpi: "",
     no_ai_alternative: [],
@@ -868,9 +955,11 @@ export function getMissingStep1RequiredFields(step1: Step1Data): string[] {
   if (step1.target.length === 0) missing.push("누구를 위한 기능인가");
   if (!step1.as_is.trim()) missing.push("어떤 문제인가 (AS-IS)");
   if (!step1.result_state) missing.push("끝나면 무엇이 남는가");
-  if (!step1.ai_min_role) missing.push("AI 최소 역할");
+  if (step1.ai_task_types.length === 0) missing.push("AI 작업 유형");
   if (!step1.kpi.trim()) missing.push("KPI/지표 가설");
-  if (step1.no_ai_alternative.length === 0) missing.push("AI 없이 대안");
+  if (step1.no_ai_alternative.length === 0 && step1.no_ai_alternative_detail.trim().length === 0) {
+    missing.push("AI 없이 대안");
+  }
   if (!step1.exposure) missing.push("노출 범위");
   if (!step1.reversibility) missing.push("되돌림 가능성");
   if (!step1.impact) missing.push("실패 비용 위치");
@@ -1080,7 +1169,7 @@ export function generateTechSpec(step1: Step1Data, step2Draft: string, step3: St
     `- as_is: ${step1.as_is || "미정"}`,
     `- result_state: ${step1.result_state || "미정"}`,
     `- kpi: ${step1.kpi || "미정"}`,
-    `- no_ai_alternative: ${step1.no_ai_alternative.join(", ") || "미정"}`,
+    `- no_ai_alternative: ${step1.no_ai_alternative_detail || step1.no_ai_alternative.join(", ") || "미정"}`,
     `- exposure: ${step1.exposure || "미정"}`,
     `- reversibility: ${step1.reversibility || "미정"}`,
     `- impact: ${step1.impact || "미정"}`,

@@ -17,29 +17,35 @@ import {
   setStep1Data,
   setStep2Data,
   type Step1Data,
+  type Step1AiTaskType,
   type Step1AiMinRole,
   type Step1Exposure,
   type Step1Hitl,
   type Step1Impact,
-  type Step1NoAiAlternative,
   type Step1ResultState,
   type Step1Reversibility,
   type Step1Target,
 } from "@/lib/prismMvp";
 
 const TARGET_OPTIONS: Array<{ value: Step1Target; label: string }> = [
-  { value: "internal_operator", label: "내부 운영자" },
-  { value: "content_writer", label: "콘텐츠 작성자" },
-  { value: "admin", label: "관리자" },
-  { value: "general_user", label: "일반 사용자" },
-  { value: "customer", label: "고객" },
+  { value: "internal_staff", label: "내부 실무자" },
+  { value: "approver_admin", label: "승인자/관리자" },
+  { value: "end_user", label: "최종 사용자" },
+  { value: "external_customer_partner", label: "외부 고객/파트너" },
+  { value: "system_operator", label: "시스템 운영자" },
 ];
 
 const RESULT_STATE_OPTIONS: Array<{ value: Step1ResultState; label: string }> = [
-  { value: "draft", label: "draft 저장" },
-  { value: "status_change", label: "상태 변경" },
-  { value: "external_publish", label: "외부 게시" },
-  { value: "internal_reference", label: "내부 참고 자료" },
+  { value: "draft_saved", label: "초안 생성/저장" },
+  { value: "status_changed", label: "상태 변경" },
+  { value: "review_requested", label: "검토/승인 요청 생성" },
+  { value: "published_or_executed", label: "외부 게시/실행 완료" },
+  { value: "reference_saved", label: "내부 참고자료/리포트 저장" },
+  { value: "action_triggered", label: "알림/후속 액션 트리거" },
+  { value: "task_created", label: "티켓/작업 생성" },
+  { value: "ephemeral_response", label: "저장 없음(일회성 응답)" },
+  { value: "failed", label: "실패 기록" },
+  { value: "cancelled", label: "취소/중단" },
 ];
 
 const AI_MIN_ROLE_OPTIONS: Array<{ value: Step1AiMinRole; label: string }> = [
@@ -47,12 +53,13 @@ const AI_MIN_ROLE_OPTIONS: Array<{ value: Step1AiMinRole; label: string }> = [
   { value: "auto_publish", label: "자동 게시까지" },
 ];
 
-const NO_AI_OPTIONS: Array<{ value: Step1NoAiAlternative; label: string }> = [
-  { value: "manual", label: "수동 작성" },
-  { value: "template", label: "템플릿 기반" },
-  { value: "rule_based", label: "룰 기반 처리" },
-  { value: "search_based", label: "검색 기반" },
-  { value: "other", label: "기타" },
+const AI_TASK_TYPE_OPTIONS: Array<{ value: Step1AiTaskType; label: string }> = [
+  { value: "input_structuring", label: "입력 정리" },
+  { value: "draft_generation", label: "초안 생성" },
+  { value: "candidate_suggestion", label: "후보 제시" },
+  { value: "approval_assist", label: "승인 보조" },
+  { value: "auto_execution", label: "자동 실행" },
+  { value: "no_intervention", label: "개입 없음" },
 ];
 
 const EXPOSURE_OPTIONS: Array<{ value: Step1Exposure; label: string }> = [
@@ -105,12 +112,13 @@ const HITL_LABEL: Record<Step1Hitl, string> = {
 
 type InputMode = "form" | "table";
 type RightPanelTab = "preview" | "impact";
+type PreviewAreaKey = "strategy" | "policy" | "automation" | "state_flow" | "risk_profile";
 type Step1TableRowId =
   | "why"
   | "target"
   | "as_is"
   | "result_state"
-  | "ai_min_role"
+  | "ai_task_types"
   | "no_ai_alternative"
   | "exposure"
   | "reversibility"
@@ -126,16 +134,71 @@ type Step1TableRow = {
   value: string;
 };
 
+type SheetColIndex = 0 | 1 | 2;
+type SheetCell = { row: number; col: SheetColIndex };
+type Step1TableNotes = Partial<Record<Step1TableRowId, string>>;
+
+const DEFAULT_STEP1_ROW_ORDER: Step1TableRowId[] = [
+  "why",
+  "target",
+  "as_is",
+  "result_state",
+  "ai_task_types",
+  "no_ai_alternative",
+  "exposure",
+  "reversibility",
+  "impact",
+  "hitl",
+  "kpi",
+];
+
+const PREVIEW_AREA_META: Record<
+  PreviewAreaKey,
+  { label: string; bg: string; fg: string; border: string; rowIds: Step1TableRowId[] }
+> = {
+  strategy: {
+    label: "기획 의도",
+    bg: "#e0f2fe",
+    fg: "#075985",
+    border: "#7dd3fc",
+    rowIds: ["why", "target", "result_state", "kpi"],
+  },
+  policy: {
+    label: "통제 지점",
+    bg: "#dcfce7",
+    fg: "#166534",
+    border: "#86efac",
+    rowIds: ["exposure", "reversibility", "impact", "hitl"],
+  },
+  automation: {
+    label: "실행 구조",
+    bg: "#f3e8ff",
+    fg: "#6b21a8",
+    border: "#d8b4fe",
+    rowIds: ["ai_task_types", "exposure", "impact", "hitl"],
+  },
+  state_flow: {
+    label: "상태 모델",
+    bg: "#fef3c7",
+    fg: "#92400e",
+    border: "#fcd34d",
+    rowIds: ["result_state", "hitl"],
+  },
+  risk_profile: {
+    label: "리스크 영향",
+    bg: "#fee2e2",
+    fg: "#991b1b",
+    border: "#fca5a5",
+    rowIds: ["exposure", "reversibility", "impact", "hitl"],
+  },
+};
+
 function getSingleSelectOptionsByRowId(rowId: Step1TableRowId) {
   switch (rowId) {
     case "target":
       return TARGET_OPTIONS;
     case "result_state":
       return RESULT_STATE_OPTIONS;
-    case "ai_min_role":
-      return AI_MIN_ROLE_OPTIONS;
-    case "no_ai_alternative":
-      return NO_AI_OPTIONS;
     case "exposure":
       return EXPOSURE_OPTIONS;
     case "reversibility":
@@ -150,9 +213,10 @@ function getSingleSelectOptionsByRowId(rowId: Step1TableRowId) {
 }
 
 const TARGET_LABEL_BY_VALUE: Record<Step1Target, string> = Object.fromEntries(TARGET_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1Target, string>;
-const AI_MIN_ROLE_LABEL_BY_VALUE: Record<Step1AiMinRole, string> = Object.fromEntries(AI_MIN_ROLE_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1AiMinRole, string>;
-const NO_AI_LABEL_BY_VALUE: Record<Step1NoAiAlternative, string> = Object.fromEntries(NO_AI_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1NoAiAlternative, string>;
+const AI_TASK_TYPE_LABEL_BY_VALUE: Record<Step1AiTaskType, string> = Object.fromEntries(AI_TASK_TYPE_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1AiTaskType, string>;
+const AI_TASK_TYPE_CODE_BY_VALUE: Record<Step1AiTaskType, string> = Object.fromEntries(AI_TASK_TYPE_OPTIONS.map((o) => [o.value, o.value.toUpperCase()])) as Record<Step1AiTaskType, string>;
 const RESULT_LABEL_BY_VALUE: Record<Step1ResultState, string> = Object.fromEntries(RESULT_STATE_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1ResultState, string>;
+const RESULT_CODE_BY_VALUE: Record<Step1ResultState, string> = Object.fromEntries(RESULT_STATE_OPTIONS.map((o) => [o.value, o.value])) as Record<Step1ResultState, string>;
 const EXPOSURE_LABEL_BY_VALUE: Record<Step1Exposure, string> = Object.fromEntries(EXPOSURE_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1Exposure, string>;
 const REVERSIBILITY_LABEL_BY_VALUE: Record<Step1Reversibility, string> = Object.fromEntries(REVERSIBILITY_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1Reversibility, string>;
 const IMPACT_LABEL_BY_VALUE: Record<Step1Impact, string> = Object.fromEntries(IMPACT_OPTIONS.map((o) => [o.value, o.label])) as Record<Step1Impact, string>;
@@ -174,20 +238,93 @@ function parseSingleByOption<T extends string>(raw: string, options: Array<{ val
   return "";
 }
 
+function parseMultiByOption<T extends string>(raw: string, options: Array<{ value: T; label: string }>): T[] {
+  const tokens = normalizeTokens(raw).map((token) => token.toLowerCase());
+  if (tokens.length === 0) return [];
+  const matched = new Set<T>();
+  for (const token of tokens) {
+    for (const option of options) {
+      if (option.value.toLowerCase() === token || option.label.toLowerCase() === token) {
+        matched.add(option.value);
+      }
+    }
+  }
+  return Array.from(matched);
+}
+
+function parseTargetWithAlias(raw: string): Step1Target | "" {
+  const token = normalizeTokens(raw)[0]?.toLowerCase();
+  if (!token) return "";
+  const direct = parseSingleByOption(token, TARGET_OPTIONS);
+  if (direct) return direct;
+
+  if (token.includes("마케터") || token.includes("작성자") || token.includes("콘텐츠") || token.includes("내부")) return "internal_staff";
+  if (token.includes("승인") || token.includes("관리자")) return "approver_admin";
+  if (token.includes("일반") || token.includes("최종") || token.includes("end user")) return "end_user";
+  if (token.includes("고객") || token.includes("파트너")) return "external_customer_partner";
+  if (token.includes("시스템") || token.includes("운영자")) return "system_operator";
+
+  return "";
+}
+
+function getSingleValueByRowId(rowId: Step1TableRowId, data: Step1Data): string {
+  if (rowId === "target") return data.target[0] ?? "";
+  if (rowId === "result_state") return data.result_state;
+  if (rowId === "exposure") return data.exposure;
+  if (rowId === "reversibility") return data.reversibility;
+  if (rowId === "impact") return data.impact;
+  if (rowId === "hitl") return data.hitl;
+  return "";
+}
+
+function getValueExampleByRowId(rowId: Step1TableRowId): string {
+  switch (rowId) {
+    case "why":
+      return "ex) 반복 작업 자동화로 작성 시간을 줄이고 일관성을 높임";
+    case "target":
+      return "ex) 콘텐츠 작성자";
+    case "as_is":
+      return "ex) 초안 작성이 오래 걸리고 톤이 들쭉날쭉함";
+    case "result_state":
+      return "ex) 초안 생성/저장";
+    case "ai_task_types":
+      return "ex) 분류, 추천";
+    case "no_ai_alternative":
+      return "ex) 템플릿 기반 수동 작성";
+    case "exposure":
+      return "ex) 제한적 고객 노출";
+    case "reversibility":
+      return "ex) 언제든 수정·중단 가능";
+    case "impact":
+      return "ex) 고객 혼선";
+    case "hitl":
+      return "ex) 사람이 먼저 보고 결정";
+    case "kpi":
+      return "ex) 작성 시간 10% 단축 → 발행 빈도 증가";
+    default:
+      return "예시를 입력해 주세요";
+  }
+}
+
 function buildStep1TableRows(data: Step1Data): Step1TableRow[] {
   return [
     { id: "why", section: "전략", field: "왜 AI를 붙이나요", note: "", value: data.why },
-    { id: "target", section: "전략", field: "누구를 위한 기능인가요", note: "폼 모드에서 복수 선택 가능", value: data.target[0] ? TARGET_LABEL_BY_VALUE[data.target[0]] : "" },
+    { id: "target", section: "전략", field: "누구를 위한 기능인가요", note: "", value: data.target[0] ? TARGET_LABEL_BY_VALUE[data.target[0]] : "" },
     { id: "as_is", section: "문제", field: "현재 어떤 문제가 있나요 (AS-IS)", note: "", value: data.as_is },
     { id: "result_state", section: "결과", field: "이 플로우가 끝나면 무엇이 남나요 (결과 상태)", note: "", value: data.result_state ? RESULT_LABEL_BY_VALUE[data.result_state] : "" },
-    { id: "ai_min_role", section: "전략", field: "AI는 어디까지 맡나요 (최소 역할)", note: "", value: data.ai_min_role ? AI_MIN_ROLE_LABEL_BY_VALUE[data.ai_min_role] : "" },
-    { id: "no_ai_alternative", section: "대안", field: "AI 없이 가능한 방법은 무엇인가요", note: "폼 모드에서 복수 선택 가능", value: data.no_ai_alternative[0] ? NO_AI_LABEL_BY_VALUE[data.no_ai_alternative[0]] : "" },
+    { id: "ai_task_types", section: "전략", field: "AI는 무엇을 하나요 (작업 유형)", note: "", value: data.ai_task_types.map((v) => AI_TASK_TYPE_LABEL_BY_VALUE[v]).join(", ") },
+    { id: "no_ai_alternative", section: "대안", field: "AI 없이 대안 1줄", note: "", value: data.no_ai_alternative_detail },
     { id: "exposure", section: "운영", field: "AI 결과가 외부에 공개되나요 (Exposure)", note: "", value: data.exposure ? EXPOSURE_LABEL_BY_VALUE[data.exposure] : "" },
     { id: "reversibility", section: "운영", field: "문제가 생기면 되돌릴 수 있나요 (Reversibility)", note: "", value: data.reversibility ? REVERSIBILITY_LABEL_BY_VALUE[data.reversibility] : "" },
     { id: "impact", section: "운영", field: "틀리면 가장 부담이 큰 곳은 어디인가요 (Impact)", note: "", value: data.impact ? IMPACT_LABEL_BY_VALUE[data.impact] : "" },
     { id: "hitl", section: "운영", field: "사람이 언제 한 번이라도 보게 되나요 (HITL)", note: "", value: data.hitl ? HITL_LABEL_BY_VALUE[data.hitl] : "" },
     { id: "kpi", section: "문제", field: "KPI / 성공 가설", note: "", value: data.kpi },
   ];
+}
+
+function getNotePlaceholderByRowId(rowId: Step1TableRowId): string {
+  if (rowId === "target" || rowId === "ai_task_types") return "폼 모드에서 복수 선택 가능";
+  return "";
 }
 
 export default function ScreeningPage() {
@@ -199,33 +336,92 @@ export default function ScreeningPage() {
   const [message, setMessage] = useState("");
   const [inputMode, setInputMode] = useState<InputMode>("table");
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("preview");
+  const [activePreviewArea, setActivePreviewArea] = useState<PreviewAreaKey | null>(null);
+  const [rowOrder, setRowOrder] = useState<Step1TableRowId[]>(DEFAULT_STEP1_ROW_ORDER);
+  const [dragRowId, setDragRowId] = useState<Step1TableRowId | null>(null);
+  const [dropRowId, setDropRowId] = useState<Step1TableRowId | null>(null);
+  const [dropPosition, setDropPosition] = useState<"before" | "after">("after");
   const [rightPanelWidth, setRightPanelWidth] = useState(360);
   const [isResizing, setIsResizing] = useState(false);
   const twoPaneRef = useRef<HTMLDivElement | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
-  const [activeRowIndex, setActiveRowIndex] = useState<number | null>(null);
-  const [selectionRange, setSelectionRange] = useState<{ start: number; end: number } | null>(null);
+  const [activeCell, setActiveCell] = useState<SheetCell | null>(null);
+  const [selectionRange, setSelectionRange] = useState<{ start: SheetCell; end: SheetCell } | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
   const [editingRowId, setEditingRowId] = useState<Step1TableRowId | null>(null);
+  const [tableNotes, setTableNotes] = useState<Step1TableNotes>({});
+  const [savedDataSnapshot, setSavedDataSnapshot] = useState<Step1Data | null>(null);
+  const [savedNotesSnapshot, setSavedNotesSnapshot] = useState<Step1TableNotes | null>(null);
+  const [savedRowOrderSnapshot, setSavedRowOrderSnapshot] = useState<Step1TableRowId[] | null>(null);
 
   useEffect(() => {
     if (!id) return;
-    setData(getStep1Data(id));
+    const loadedData = getStep1Data(id);
+    setData(loadedData);
+    setSavedDataSnapshot(loadedData);
     setFrozen(getProgress(id).step1Frozen);
+    let normalizedOrder = DEFAULT_STEP1_ROW_ORDER;
+    try {
+      const raw = localStorage.getItem(`prism:mvp:${id}:step1:row-order`);
+      if (!raw) {
+        setRowOrder(DEFAULT_STEP1_ROW_ORDER);
+      } else {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+          setRowOrder(DEFAULT_STEP1_ROW_ORDER);
+        } else {
+          normalizedOrder = [
+            ...parsed.filter((v): v is Step1TableRowId => DEFAULT_STEP1_ROW_ORDER.includes(v)),
+            ...DEFAULT_STEP1_ROW_ORDER.filter((v) => !parsed.includes(v)),
+          ];
+          setRowOrder(normalizedOrder);
+        }
+      }
+    } catch {
+      setRowOrder(DEFAULT_STEP1_ROW_ORDER);
+    }
+    setSavedRowOrderSnapshot(normalizedOrder);
+
+    let loadedNotes: Step1TableNotes = {};
+    try {
+      const rawNotes = localStorage.getItem(`prism:mvp:${id}:step1:notes`);
+      if (!rawNotes) {
+        loadedNotes = {};
+        setTableNotes(loadedNotes);
+      } else {
+        const parsedNotes = JSON.parse(rawNotes) as Step1TableNotes;
+        loadedNotes = parsedNotes ?? {};
+        setTableNotes(loadedNotes);
+      }
+    } catch {
+      loadedNotes = {};
+      setTableNotes(loadedNotes);
+    }
+    setSavedNotesSnapshot(loadedNotes);
   }, [id]);
 
   const riskLevel = useMemo(() => computeRisk(data), [data]);
   const freezeReady = canFreezeStep1(data);
   const missingForFreeze = useMemo(() => getMissingStep1RequiredFields(data), [data]);
 
-  const autoDraft = true;
-  const autoPublish = data.exposure !== "public" && data.impact !== "high";
-  const manualReviewRequired = data.impact === "high" || data.hitl === "pre_review";
+  const hasAutomationInputs = data.ai_task_types.length > 0 || Boolean(data.result_state) || Boolean(data.hitl) || Boolean(data.impact) || Boolean(data.exposure);
+  const wantsAutoExecution = data.ai_task_types.includes("auto_execution") || data.result_state === "published_or_executed";
+  const autoDraft = data.ai_task_types.includes("draft_generation") || data.result_state === "draft_saved";
+  const autoPublish = wantsAutoExecution && data.exposure !== "public" && data.impact !== "high" && data.hitl !== "pre_review";
+  const manualReviewRequired = data.result_state === "review_requested" || data.impact === "high" || data.hitl === "pre_review";
+  const conditionalAutoApprove = wantsAutoExecution && data.hitl === "post_monitoring" && data.impact !== "high";
+  const autoDraftStatus = hasAutomationInputs ? (autoDraft ? "활성화 (ENABLED)" : "비활성화 (DISABLED)") : "미선택 (UNSET)";
+  const autoPublishStatus = hasAutomationInputs ? (autoPublish ? "활성화 (ENABLED)" : "비활성화 (DISABLED)") : "미선택 (UNSET)";
+  const preReviewStatus = hasAutomationInputs ? (manualReviewRequired ? "필수 (REQUIRED)" : "없음 (NOT_REQUIRED)") : "미선택 (UNSET)";
+  const conditionalAutoApproveStatus = hasAutomationInputs ? (conditionalAutoApprove ? "허용 (ALLOWED)" : "불가 (NOT_ALLOWED)") : "미선택 (UNSET)";
   const stateFlow = manualReviewRequired
     ? ["input", "generating", "draft", "review_required", "approved", "publish"]
     : ["input", "generating", "draft", "approved", "publish"];
   const targetSummary = data.target.length > 0 ? data.target.map((v) => TARGET_LABEL_BY_VALUE[v]).join(", ") : "미선택";
-  const resultStateSummary = data.result_state ? `${RESULT_LABEL_BY_VALUE[data.result_state]} (${data.result_state.toUpperCase()})` : "미선택 (UNSET)";
+  const aiTaskTypesSummary = data.ai_task_types.length > 0
+    ? data.ai_task_types.map((v) => `${AI_TASK_TYPE_LABEL_BY_VALUE[v]} (${AI_TASK_TYPE_CODE_BY_VALUE[v]})`).join(", ")
+    : "미선택 (UNSET)";
+  const resultStateSummary = data.result_state ? `${RESULT_LABEL_BY_VALUE[data.result_state]} (${RESULT_CODE_BY_VALUE[data.result_state]})` : "미선택 (UNSET)";
   const kpiSummary = data.kpi.trim() || "미입력";
   const exposureSummary = data.exposure ? `${EXPOSURE_LABEL[data.exposure]} (${data.exposure.toUpperCase()})` : "미선택 (UNSET)";
   const reversibilitySummary = data.reversibility
@@ -234,28 +430,62 @@ export default function ScreeningPage() {
   const impactSummary = data.impact ? `${IMPACT_LABEL[data.impact]} (${data.impact.toUpperCase()})` : "미선택 (UNSET)";
   const hitlSummary = data.hitl ? `${HITL_LABEL[data.hitl]} (${data.hitl.toUpperCase()})` : "미선택 (UNSET)";
   const riskReasons = [
-    data.exposure === "public"
-      ? "외부 공개 범위 (Exposure=PUBLIC)"
-      : data.exposure === "limited_external"
-        ? "제한적 고객 노출 (Exposure=LIMITED_EXTERNAL)"
-        : "내부 노출 중심 (Exposure=INTERNAL)",
-    data.hitl === "pre_review"
-      ? "사전 검토 존재 (HITL=PRE_REVIEW)"
-      : data.hitl === "post_monitoring"
-        ? "사후 모니터링 기반 (HITL=POST_MONITORING)"
-        : "인간 개입 없음 (HITL=NONE)",
-    data.reversibility === "easy"
-      ? "되돌림 가능 (Reversibility=EASY)"
-      : data.reversibility === "limited"
-        ? "부분 되돌림 가능 (Reversibility=LIMITED)"
-        : "되돌림 어려움 (Reversibility=IRREVERSIBLE)",
+    data.exposure
+      ? data.exposure === "public"
+        ? "외부 공개 범위 (Exposure=PUBLIC)"
+        : data.exposure === "limited_external"
+          ? "제한적 고객 노출 (Exposure=LIMITED_EXTERNAL)"
+          : "내부 노출 중심 (Exposure=INTERNAL)"
+      : "노출 범위 미선택",
+    data.hitl
+      ? data.hitl === "pre_review"
+        ? "사전 검토 존재 (HITL=PRE_REVIEW)"
+        : data.hitl === "post_monitoring"
+          ? "사후 모니터링 기반 (HITL=POST_MONITORING)"
+          : "인간 개입 없음 (HITL=NONE)"
+      : "인간 개입 시점 미선택",
+    data.reversibility
+      ? data.reversibility === "easy"
+        ? "되돌림 가능 (Reversibility=EASY)"
+        : data.reversibility === "limited"
+          ? "부분 되돌림 가능 (Reversibility=LIMITED)"
+          : "되돌림 어려움 (Reversibility=IRREVERSIBLE)"
+      : "되돌림 가능성 미선택",
   ];
-  const tableRows = useMemo(() => buildStep1TableRows(data), [data]);
-  const selectedIndices = useMemo(() => {
-    if (!selectionRange) return [];
-    const from = Math.min(selectionRange.start, selectionRange.end);
-    const to = Math.max(selectionRange.start, selectionRange.end);
-    return Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  const tableRows = useMemo(() => {
+    const baseRows = buildStep1TableRows(data);
+    const rowById = new Map(baseRows.map((row) => [row.id, row]));
+    const normalizedOrder = [
+      ...rowOrder.filter((rowId) => rowById.has(rowId)),
+      ...DEFAULT_STEP1_ROW_ORDER.filter((rowId) => rowById.has(rowId) && !rowOrder.includes(rowId)),
+    ];
+    return normalizedOrder
+      .map((rowId) => rowById.get(rowId))
+      .filter((row): row is Step1TableRow => Boolean(row))
+      .map((row) => ({ ...row, note: tableNotes[row.id] ?? row.note }));
+  }, [data, rowOrder, tableNotes]);
+  const highlightedRowIds = useMemo(
+    () => new Set<Step1TableRowId>(activePreviewArea ? PREVIEW_AREA_META[activePreviewArea].rowIds : []),
+    [activePreviewArea]
+  );
+  const isDirty = useMemo(() => {
+    if (!savedDataSnapshot || !savedNotesSnapshot || !savedRowOrderSnapshot) return false;
+    const normalizeNotes = (notes: Step1TableNotes) =>
+      Object.fromEntries(Object.entries(notes).filter(([, value]) => (value ?? "").trim().length > 0));
+    return (
+      JSON.stringify(data) !== JSON.stringify(savedDataSnapshot) ||
+      JSON.stringify(rowOrder) !== JSON.stringify(savedRowOrderSnapshot) ||
+      JSON.stringify(normalizeNotes(tableNotes)) !== JSON.stringify(normalizeNotes(savedNotesSnapshot))
+    );
+  }, [data, rowOrder, tableNotes, savedDataSnapshot, savedNotesSnapshot, savedRowOrderSnapshot]);
+  const selectedBounds = useMemo(() => {
+    if (!selectionRange) return null;
+    return {
+      rowMin: Math.min(selectionRange.start.row, selectionRange.end.row),
+      rowMax: Math.max(selectionRange.start.row, selectionRange.end.row),
+      colMin: Math.min(selectionRange.start.col, selectionRange.end.col) as SheetColIndex,
+      colMax: Math.max(selectionRange.start.col, selectionRange.end.col) as SheetColIndex,
+    };
   }, [selectionRange]);
 
   useEffect(() => {
@@ -292,13 +522,13 @@ export default function ScreeningPage() {
     setData((prev) => ({ ...prev, [key]: value }));
   }
 
-  function toggleMultiValue<K extends "target" | "no_ai_alternative">(key: K, value: Step1Data[K][number]) {
+  function toggleMultiValue(key: "target", value: Step1Data["target"][number]) {
     if (frozen) return;
     setData((prev) => {
-      const current = prev[key] as string[];
-      const exists = current.includes(value as string);
-      const next = exists ? current.filter((v) => v !== value) : [...current, value as string];
-      return { ...prev, [key]: next } as Step1Data;
+      const current = prev[key];
+      const exists = current.includes(value);
+      const next = exists ? current.filter((v) => v !== value) : [...current, value];
+      return { ...prev, [key]: next };
     });
   }
 
@@ -312,7 +542,7 @@ export default function ScreeningPage() {
           return {
             ...prev,
             target: (() => {
-              const single = parseSingleByOption(rawValue, TARGET_OPTIONS);
+              const single = parseTargetWithAlias(rawValue);
               return single ? [single] : [];
             })(),
           };
@@ -320,15 +550,13 @@ export default function ScreeningPage() {
           return { ...prev, as_is: rawValue };
         case "result_state":
           return { ...prev, result_state: parseSingleByOption(rawValue, RESULT_STATE_OPTIONS) };
-        case "ai_min_role":
-          return { ...prev, ai_min_role: parseSingleByOption(rawValue, AI_MIN_ROLE_OPTIONS) };
+        case "ai_task_types":
+          return { ...prev, ai_task_types: parseMultiByOption(rawValue, AI_TASK_TYPE_OPTIONS) };
         case "no_ai_alternative":
           return {
             ...prev,
-            no_ai_alternative: (() => {
-              const single = parseSingleByOption(rawValue, NO_AI_OPTIONS);
-              return single ? [single] : [];
-            })(),
+            no_ai_alternative_detail: rawValue,
+            no_ai_alternative: rawValue.trim() ? prev.no_ai_alternative : [],
           };
         case "exposure":
           return { ...prev, exposure: parseSingleByOption(rawValue, EXPOSURE_OPTIONS) };
@@ -346,56 +574,84 @@ export default function ScreeningPage() {
     });
   }
 
-  function startRowSelection(rowIndex: number) {
-    setActiveRowIndex(rowIndex);
-    setSelectionRange({ start: rowIndex, end: rowIndex });
+  function startCellSelection(row: number, col: SheetColIndex) {
+    const cell: SheetCell = { row, col };
+    setActiveCell(cell);
+    setSelectionRange({ start: cell, end: cell });
     setIsSelecting(true);
     setEditingRowId(null);
     sheetRef.current?.focus();
   }
 
-  function extendRowSelection(rowIndex: number) {
-    if (!isSelecting || activeRowIndex === null) return;
-    setSelectionRange({ start: activeRowIndex, end: rowIndex });
+  function extendCellSelection(row: number, col: SheetColIndex) {
+    if (!isSelecting || !activeCell) return;
+    setSelectionRange({ start: activeCell, end: { row, col } });
   }
 
-  function copySelectedRowsToText() {
-    const rowsToCopy = selectedIndices.length > 0 ? selectedIndices : activeRowIndex !== null ? [activeRowIndex] : [];
-    if (rowsToCopy.length === 0) return null;
-    const header = "Field\tValue\tNote";
+  function isCellInSelection(row: number, col: SheetColIndex) {
+    if (!selectedBounds) return false;
+    return row >= selectedBounds.rowMin && row <= selectedBounds.rowMax && col >= selectedBounds.colMin && col <= selectedBounds.colMax;
+  }
+
+  function getCellText(row: Step1TableRow, col: SheetColIndex) {
+    if (col === 0) return row.field;
+    if (col === 1) return row.value;
+    return row.note ?? "";
+  }
+
+  function copySelectedCellsToText() {
+    if (!selectedBounds && !activeCell) return null;
+    const rowMin = selectedBounds?.rowMin ?? activeCell?.row ?? 0;
+    const rowMax = selectedBounds?.rowMax ?? activeCell?.row ?? 0;
+    const colMin = selectedBounds?.colMin ?? (activeCell?.col ?? 0);
+    const colMax = selectedBounds?.colMax ?? (activeCell?.col ?? 0);
+
+    const lines: string[] = [];
+    for (let r = rowMin; r <= rowMax; r += 1) {
+      const row = tableRows[r];
+      if (!row) continue;
+      const cols: string[] = [];
+      for (let c = colMin; c <= colMax; c += 1) {
+        cols.push(getCellText(row, c as SheetColIndex));
+      }
+      lines.push(cols.join("\t"));
+    }
+
     return {
-      text: [
-        header,
-        ...rowsToCopy.map((idx) => {
-          const row = tableRows[idx];
-          if (!row) return "";
-          return [row.field, row.value, row.note ?? ""].join("\t");
-        }),
-      ].join("\n"),
-      count: rowsToCopy.length,
+      text: lines.join("\n"),
+      count: lines.length,
     };
   }
 
-  function applyPasteByRows(startIndex: number, text: string) {
+  function applyPasteByCells(start: SheetCell, text: string) {
     const lines = text
       .split(/\r?\n/)
-      .map((line) => {
-        const cols = line.split("\t").map((c) => c.trim());
-        if (cols.length >= 2) return cols[1] ?? "";
-        return cols[0] ?? "";
-      })
-      .filter((line) => line.length > 0);
+      .map((line) => line.split("\t").map((c) => c.trim()))
+      .filter((cols) => cols.some((v) => v.length > 0));
     if (lines.length === 0) return;
 
-    for (let i = 0; i < lines.length; i += 1) {
-      const rowIndex = startIndex + i;
+    let updatedRows = 0;
+    for (let r = 0; r < lines.length; r += 1) {
+      const rowIndex = start.row + r;
       if (rowIndex >= tableRows.length) break;
-      updateTableCell(tableRows[rowIndex].id, lines[i]);
+      const rowId = tableRows[rowIndex]?.id;
+      if (!rowId) continue;
+
+      for (let c = 0; c < lines[r].length; c += 1) {
+        const colIndex = (start.col + c) as number;
+        if (colIndex !== 1) continue;
+        updateTableCell(rowId, lines[r][c]);
+        updatedRows += 1;
+      }
     }
-    const endIndex = Math.min(startIndex + lines.length - 1, tableRows.length - 1);
-    setSelectionRange({ start: startIndex, end: endIndex });
-    setActiveRowIndex(startIndex);
-    setMessage(`붙여넣기 완료: ${endIndex - startIndex + 1}행`);
+
+    const end: SheetCell = {
+      row: Math.min(start.row + lines.length - 1, tableRows.length - 1),
+      col: Math.min((start.col + (lines[0]?.length ?? 1) - 1) as number, 2) as SheetColIndex,
+    };
+    setSelectionRange({ start, end });
+    setActiveCell(start);
+    setMessage(`붙여넣기 완료: ${updatedRows}셀`);
   }
 
   function isEditableTarget(target: EventTarget | null) {
@@ -406,7 +662,7 @@ export default function ScreeningPage() {
   function handleSheetCopy(e: React.ClipboardEvent<HTMLDivElement>) {
     if (inputMode !== "table") return;
     if (isEditableTarget(e.target)) return;
-    const copied = copySelectedRowsToText();
+    const copied = copySelectedCellsToText();
     if (!copied) return;
     e.preventDefault();
     e.clipboardData.setData("text/plain", copied.text);
@@ -416,10 +672,10 @@ export default function ScreeningPage() {
   function handleSheetPaste(e: React.ClipboardEvent<HTMLDivElement>) {
     if (inputMode !== "table") return;
     if (isEditableTarget(e.target)) return;
-    if (activeRowIndex === null) return;
+    if (!activeCell) return;
     e.preventDefault();
     const text = e.clipboardData.getData("text/plain");
-    applyPasteByRows(activeRowIndex, text);
+    applyPasteByCells(activeCell, text);
   }
 
   function handleSheetKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
@@ -434,13 +690,225 @@ export default function ScreeningPage() {
     if (e.key.toLowerCase() === "a") {
       e.preventDefault();
       if (tableRows.length === 0) return;
-      setActiveRowIndex(0);
-      setSelectionRange({ start: 0, end: tableRows.length - 1 });
-      setMessage("표 전체 행 선택");
+      setActiveCell({ row: 0, col: 0 });
+      setSelectionRange({ start: { row: 0, col: 0 }, end: { row: tableRows.length - 1, col: 2 } });
+      setMessage("표 전체 셀 선택");
     }
-    if (e.key === "Enter" && activeRowIndex !== null && !frozen) {
+    if (e.key === "Enter" && activeCell && !frozen) {
       e.preventDefault();
-      setEditingRowId(tableRows[activeRowIndex]?.id ?? null);
+      if (activeCell.col === 1) {
+        setEditingRowId(tableRows[activeCell.row]?.id ?? null);
+      }
+    }
+  }
+
+  function moveRow(dragId: Step1TableRowId, targetId: Step1TableRowId, pos: "before" | "after") {
+    setRowOrder((prev) => {
+      const current = prev.length > 0 ? prev : DEFAULT_STEP1_ROW_ORDER;
+      const next = [...current];
+      const from = next.indexOf(dragId);
+      const target = next.indexOf(targetId);
+      if (from === -1 || target === -1) return current;
+      next.splice(from, 1);
+      let insertAt = target;
+      if (from < target) insertAt -= 1;
+      if (pos === "after") insertAt += 1;
+      insertAt = Math.max(0, Math.min(next.length, insertAt));
+      next.splice(insertAt, 0, dragId);
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (!id || rowOrder.length === 0) return;
+    try {
+      localStorage.setItem(`prism:mvp:${id}:step1:row-order`, JSON.stringify(rowOrder));
+    } catch {
+      // ignore localStorage quota/read-only errors
+    }
+  }, [id, rowOrder]);
+
+  useEffect(() => {
+    if (!id) return;
+    try {
+      localStorage.setItem(`prism:mvp:${id}:step1:notes`, JSON.stringify(tableNotes));
+    } catch {
+      // ignore localStorage quota/read-only errors
+    }
+  }, [id, tableNotes]);
+
+  function updateTableNote(rowId: Step1TableRowId, note: string) {
+    setTableNotes((prev) => ({ ...prev, [rowId]: note }));
+  }
+
+  function renderFormInputByRowId(rowId: Step1TableRowId) {
+    switch (rowId) {
+      case "why":
+        return (
+          <textarea
+            value={data.why}
+            onChange={(e) => update("why", e.target.value)}
+            disabled={frozen}
+            placeholder="ex) 반복 작업 자동화로 작성 시간을 줄이고 일관성을 높임"
+            style={{ ...inputStyle, minHeight: 84 }}
+          />
+        );
+      case "target":
+        return (
+          <div style={choiceGroupStyle}>
+            {TARGET_OPTIONS.map((option) => (
+              <label key={option.value} style={choiceLabelStyle}>
+                <input
+                  type="checkbox"
+                  checked={data.target.includes(option.value)}
+                  onChange={() => toggleMultiValue("target", option.value)}
+                  disabled={frozen}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+        );
+      case "as_is":
+        return (
+          <textarea
+            value={data.as_is}
+            onChange={(e) => update("as_is", e.target.value)}
+            disabled={frozen}
+            placeholder="ex) 게시글 초안 작성 시간이 오래 걸리고 톤 일관성이 떨어짐"
+            style={{ ...inputStyle, minHeight: 84 }}
+          />
+        );
+      case "result_state":
+        return (
+          <div style={choiceGroupStyle}>
+            {RESULT_STATE_OPTIONS.map((option) => (
+              <label key={option.value} style={choiceLabelStyle}>
+                <input
+                  type="radio"
+                  name="result_state"
+                  checked={data.result_state === option.value}
+                  onChange={() => update("result_state", option.value)}
+                  disabled={frozen}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+        );
+      case "ai_task_types":
+        return (
+          <div style={choiceGroupStyle}>
+            {AI_TASK_TYPE_OPTIONS.map((option) => (
+              <label key={option.value} style={choiceLabelStyle}>
+                <input
+                  type="checkbox"
+                  checked={data.ai_task_types.includes(option.value)}
+                  onChange={() =>
+                    update(
+                      "ai_task_types",
+                      data.ai_task_types.includes(option.value)
+                        ? data.ai_task_types.filter((v) => v !== option.value)
+                        : [...data.ai_task_types, option.value]
+                    )
+                  }
+                  disabled={frozen}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+        );
+      case "no_ai_alternative":
+        return (
+          <textarea
+            value={data.no_ai_alternative_detail}
+            onChange={(e) => update("no_ai_alternative_detail", e.target.value)}
+            disabled={frozen}
+            placeholder="ex) 템플릿 기반 수동 작성"
+            style={{ ...inputStyle, minHeight: 84 }}
+          />
+        );
+      case "exposure":
+        return (
+          <div style={choiceGroupStyle}>
+            {EXPOSURE_OPTIONS.map((option) => (
+              <label key={option.value} style={choiceLabelStyle}>
+                <input
+                  type="radio"
+                  name="exposure"
+                  checked={data.exposure === option.value}
+                  onChange={() => update("exposure", option.value)}
+                  disabled={frozen}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+        );
+      case "reversibility":
+        return (
+          <div style={choiceGroupStyle}>
+            {REVERSIBILITY_OPTIONS.map((option) => (
+              <label key={option.value} style={choiceLabelStyle}>
+                <input
+                  type="radio"
+                  name="reversibility"
+                  checked={data.reversibility === option.value}
+                  onChange={() => update("reversibility", option.value)}
+                  disabled={frozen}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+        );
+      case "impact":
+        return (
+          <div style={choiceGroupStyle}>
+            {IMPACT_OPTIONS.map((option) => (
+              <label key={option.value} style={choiceLabelStyle}>
+                <input
+                  type="radio"
+                  name="impact"
+                  checked={data.impact === option.value}
+                  onChange={() => update("impact", option.value)}
+                  disabled={frozen}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+        );
+      case "hitl":
+        return (
+          <div style={choiceGroupStyle}>
+            {HITL_OPTIONS.map((option) => (
+              <label key={option.value} style={choiceLabelStyle}>
+                <input
+                  type="radio"
+                  name="hitl"
+                  checked={data.hitl === option.value}
+                  onChange={() => update("hitl", option.value)}
+                  disabled={frozen}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+        );
+      case "kpi":
+        return (
+          <textarea
+            value={data.kpi}
+            onChange={(e) => update("kpi", e.target.value)}
+            disabled={frozen}
+            placeholder="ex) 작성 시간 10% 단축 → 발행 빈도 증가"
+            style={{ ...inputStyle, minHeight: 84 }}
+          />
+        );
+      default:
+        return null;
     }
   }
 
@@ -478,13 +946,16 @@ export default function ScreeningPage() {
       action: HISTORY_EVENT_TYPES.GENERATE_STEP2_DRAFT,
       detail: "STEP1 저장으로 STEP2 초안 자동 갱신",
     });
+    setSavedDataSnapshot(data);
+    setSavedNotesSnapshot(tableNotes);
+    setSavedRowOrderSnapshot(rowOrder);
     setMessage("STEP1 저장 완료 (STEP2 초안 자동 갱신)");
   }
 
   function handleFreeze() {
     if (!id || frozen) return;
     if (!freezeReady) {
-      setMessage(`Freeze 불가: 필수 항목 ${missingForFreeze.length}개를 채워주세요.`);
+      setMessage(`확정 불가: 필수 항목 ${missingForFreeze.length}개를 채워주세요.`);
       return;
     }
     setStep1Data(id, data);
@@ -492,10 +963,10 @@ export default function ScreeningPage() {
     addHistoryEvent(id, {
       stage: "step1",
       action: HISTORY_EVENT_TYPES.FREEZE_STEP1,
-      detail: "STEP1 Freeze 완료",
+      detail: "STEP1 확정 완료",
     });
     setFrozen(true);
-    setMessage("STEP1 Freeze 완료 (수정 잠금)");
+    setMessage("STEP1 확정 완료 (수정 잠금)");
   }
 
   return (
@@ -530,171 +1001,101 @@ export default function ScreeningPage() {
             </button>
           </div>
           <div style={headerActionStyle}>
-            <button onClick={handleSave} disabled={frozen} style={buttonStyle}>
+            <button
+              onClick={handleSave}
+              disabled={frozen || !isDirty}
+              style={{
+                ...buttonStyle,
+                color: isDirty && !frozen ? "#2563eb" : "#6b7280",
+                borderColor: isDirty && !frozen ? "#93c5fd" : "#d6dbe2",
+                background: isDirty && !frozen ? "#eff6ff" : "#f8fafc",
+                cursor: frozen || !isDirty ? "not-allowed" : "pointer",
+                opacity: frozen || !isDirty ? 0.7 : 1,
+              }}
+            >
               저장
             </button>
             <button onClick={handleFreeze} disabled={frozen || !freezeReady} style={buttonStyle}>
-              Freeze
+              확정하기
             </button>
-            {frozen && <span style={{ ...subtleStyle, alignSelf: "center" }}>🔒 Frozen</span>}
+            {frozen && <span style={{ ...subtleStyle, alignSelf: "center" }}>🔒 확정됨</span>}
           </div>
         </div>
 
         {inputMode === "form" && (
           <>
             <div style={blockStyle}>
-              <div style={blockTitleStyle}>STEP1 질문 순서</div>
-              <QuestionRow question="왜 AI를 붙이나요">
-                <textarea
-                  value={data.why}
-                  onChange={(e) => update("why", e.target.value)}
-                  disabled={frozen}
-                  placeholder="반복 작업 자동화, 시간 단축, 비용 절감, 일관성 확보"
-                  style={{ ...inputStyle, minHeight: 84 }}
-                />
-              </QuestionRow>
-              <QuestionRow question="누구를 위한 기능인가요">
-                <div style={choiceGroupStyle}>
-                  {TARGET_OPTIONS.map((option) => (
-                    <label key={option.value} style={choiceLabelStyle}>
-                      <input
-                        type="checkbox"
-                        checked={data.target.includes(option.value)}
-                        onChange={() => toggleMultiValue("target", option.value)}
-                        disabled={frozen}
+              <div style={formHeaderRowStyle}>
+                <div style={formHeadFieldStyle}>Field</div>
+                <div style={formHeadValueStyle}>Value</div>
+                <div style={formHeadNoteStyle}>Note</div>
+              </div>
+              {tableRows.map((row) => {
+                const isRelated = highlightedRowIds.has(row.id);
+                const isDraggingThis = dragRowId === row.id;
+                const dropBefore = dropRowId === row.id && dropPosition === "before";
+                const dropAfter = dropRowId === row.id && dropPosition === "after";
+                return (
+                  <div
+                    key={`form-${row.id}`}
+                    style={{
+                      ...questionRowStyle,
+                      background: isDraggingThis ? "#f8fafc" : isRelated ? "#f8fbff" : undefined,
+                      boxShadow: isRelated ? "inset 3px 0 0 #60a5fa" : undefined,
+                      borderTop: dropBefore ? "2px solid #3b82f6" : questionRowStyle.borderTop,
+                      borderBottom: dropAfter ? "2px solid #3b82f6" : undefined,
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                      const pos: "before" | "after" = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                      setDropRowId(row.id);
+                      setDropPosition(pos);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (!dragRowId || !dropRowId) return;
+                      moveRow(dragRowId, dropRowId, dropPosition);
+                      setDropRowId(null);
+                      setDragRowId(null);
+                      setMessage("행 순서가 변경되었습니다.");
+                    }}
+                    onDragLeave={() => setDropRowId(null)}
+                  >
+                    <div style={questionLabelStyle}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <button
+                          type="button"
+                          draggable
+                          style={rowDragHandleStyle}
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = "move";
+                            e.dataTransfer.setData("text/plain", row.id);
+                            setDragRowId(row.id);
+                          }}
+                          onDragEnd={() => {
+                            setDragRowId(null);
+                            setDropRowId(null);
+                          }}
+                          title="드래그해서 행 순서 변경"
+                        >
+                          ≡
+                        </button>
+                        <span>{row.field}</span>
+                      </div>
+                    </div>
+                    <div style={questionInputStyle}>{renderFormInputByRowId(row.id)}</div>
+                    <div style={formNoteCellStyle}>
+                      <textarea
+                        value={row.note || ""}
+                        onChange={(e) => updateTableNote(row.id, e.target.value)}
+                        style={formNoteInputStyle}
+                        placeholder={getNotePlaceholderByRowId(row.id)}
                       />
-                      {option.label}
-                    </label>
-                  ))}
-                </div>
-              </QuestionRow>
-              <QuestionRow question="현재 어떤 문제인가요 (AS-IS)">
-                <textarea
-                  value={data.as_is}
-                  onChange={(e) => update("as_is", e.target.value)}
-                  disabled={frozen}
-                  style={{ ...inputStyle, minHeight: 84 }}
-                />
-              </QuestionRow>
-              <QuestionRow question="이 플로우가 끝나면 무엇이 남나요 (결과 상태)">
-                <div style={choiceGroupStyle}>
-                  {RESULT_STATE_OPTIONS.map((option) => (
-                    <label key={option.value} style={choiceLabelStyle}>
-                      <input
-                        type="radio"
-                        name="result_state"
-                        checked={data.result_state === option.value}
-                        onChange={() => update("result_state", option.value)}
-                        disabled={frozen}
-                      />
-                      {option.label}
-                    </label>
-                  ))}
-                </div>
-              </QuestionRow>
-              <QuestionRow question="AI는 어디까지 맡나요 (최소 역할)">
-                <div style={choiceGroupStyle}>
-                  {AI_MIN_ROLE_OPTIONS.map((option) => (
-                    <label key={option.value} style={choiceLabelStyle}>
-                      <input
-                        type="radio"
-                        name="ai_min_role"
-                        checked={data.ai_min_role === option.value}
-                        onChange={() => update("ai_min_role", option.value)}
-                        disabled={frozen}
-                      />
-                      {option.label}
-                    </label>
-                  ))}
-                </div>
-              </QuestionRow>
-              <QuestionRow question="AI 없이 가능한 대안이 있나요">
-                <div style={choiceGroupStyle}>
-                  {NO_AI_OPTIONS.map((option) => (
-                    <label key={option.value} style={choiceLabelStyle}>
-                      <input
-                        type="checkbox"
-                        checked={data.no_ai_alternative.includes(option.value)}
-                        onChange={() => toggleMultiValue("no_ai_alternative", option.value)}
-                        disabled={frozen}
-                      />
-                      {option.label}
-                    </label>
-                  ))}
-                </div>
-              </QuestionRow>
-              <QuestionRow question="AI 결과가 외부에 공개되나요 (Exposure)">
-                <div style={choiceGroupStyle}>
-                  {EXPOSURE_OPTIONS.map((option) => (
-                    <label key={option.value} style={choiceLabelStyle}>
-                      <input
-                        type="radio"
-                        name="exposure"
-                        checked={data.exposure === option.value}
-                        onChange={() => update("exposure", option.value)}
-                        disabled={frozen}
-                      />
-                      {option.label}
-                    </label>
-                  ))}
-                </div>
-              </QuestionRow>
-              <QuestionRow question="문제가 생기면 되돌릴 수 있나요 (Reversibility)">
-                <div style={choiceGroupStyle}>
-                  {REVERSIBILITY_OPTIONS.map((option) => (
-                    <label key={option.value} style={choiceLabelStyle}>
-                      <input
-                        type="radio"
-                        name="reversibility"
-                        checked={data.reversibility === option.value}
-                        onChange={() => update("reversibility", option.value)}
-                        disabled={frozen}
-                      />
-                      {option.label}
-                    </label>
-                  ))}
-                </div>
-              </QuestionRow>
-              <QuestionRow question="틀리면 가장 부담이 큰 곳은 어디인가요 (Impact)">
-                <div style={choiceGroupStyle}>
-                  {IMPACT_OPTIONS.map((option) => (
-                    <label key={option.value} style={choiceLabelStyle}>
-                      <input
-                        type="radio"
-                        name="impact"
-                        checked={data.impact === option.value}
-                        onChange={() => update("impact", option.value)}
-                        disabled={frozen}
-                      />
-                      {option.label}
-                    </label>
-                  ))}
-                </div>
-              </QuestionRow>
-              <QuestionRow question="사람이 언제 한번이라도 보게되나요 (HITL)">
-                <div style={choiceGroupStyle}>
-                  {HITL_OPTIONS.map((option) => (
-                    <label key={option.value} style={choiceLabelStyle}>
-                      <input
-                        type="radio"
-                        name="hitl"
-                        checked={data.hitl === option.value}
-                        onChange={() => update("hitl", option.value)}
-                        disabled={frozen}
-                      />
-                      {option.label}
-                    </label>
-                  ))}
-                </div>
-              </QuestionRow>
-              <QuestionRow question="KPI / 성공 가설">
-                <textarea
-                  value={data.kpi}
-                  onChange={(e) => update("kpi", e.target.value)}
-                  disabled={frozen}
-                  style={{ ...inputStyle, minHeight: 84 }}
-                />
-              </QuestionRow>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </>
         )}
@@ -714,62 +1115,160 @@ export default function ScreeningPage() {
               <div style={sheetHeadNoteStyle}>Note</div>
             </div>
             {tableRows.map((row, rowIndex) => {
-              const isSelected = selectedIndices.includes(rowIndex);
-              const isActive = activeRowIndex === rowIndex;
+              const isRelated = highlightedRowIds.has(row.id);
+              const isFieldSelected = isCellInSelection(rowIndex, 0);
+              const isValueSelected = isCellInSelection(rowIndex, 1);
+              const isNoteSelected = isCellInSelection(rowIndex, 2);
+              const isFieldActive = activeCell?.row === rowIndex && activeCell.col === 0;
+              const isValueActive = activeCell?.row === rowIndex && activeCell.col === 1;
+              const isNoteActive = activeCell?.row === rowIndex && activeCell.col === 2;
+              const isDraggingThis = dragRowId === row.id;
+              const dropBefore = dropRowId === row.id && dropPosition === "before";
+              const dropAfter = dropRowId === row.id && dropPosition === "after";
               return (
               <div
                 key={row.id}
                 style={{
                   ...sheetDataRowStyle,
-                  background: isSelected ? "#eaf2ff" : "#fff",
-                  boxShadow: isActive ? "inset 0 0 0 1px #93c5fd" : undefined,
+                  background: isDraggingThis ? "#f8fafc" : isRelated ? "#f8fbff" : "#fff",
+                  boxShadow: isRelated ? "inset 3px 0 0 #60a5fa" : undefined,
+                  borderTop: dropBefore ? "2px solid #3b82f6" : rowIndex === 0 ? "none" : "1px solid #e5e7eb",
+                  borderBottom: dropAfter ? "2px solid #3b82f6" : sheetDataRowStyle.borderBottom,
                 }}
-                onMouseDown={(e) => {
-                  if (isEditableTarget(e.target)) return;
+                onDragOver={(e) => {
                   e.preventDefault();
-                  startRowSelection(rowIndex);
+                  const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                  const pos: "before" | "after" = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                  setDropRowId(row.id);
+                  setDropPosition(pos);
                 }}
-                onMouseEnter={() => extendRowSelection(rowIndex)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (!dragRowId || !dropRowId) return;
+                  moveRow(dragRowId, dropRowId, dropPosition);
+                  setDropRowId(null);
+                  setDragRowId(null);
+                  setMessage("행 순서가 변경되었습니다.");
+                }}
+                onDragLeave={() => {
+                  setDropRowId(null);
+                }}
               >
                 <div
-                  style={{ ...sheetFieldCellStyle, cursor: "cell" }}
+                  style={{
+                    ...sheetFieldCellStyle,
+                    cursor: "cell",
+                    background: isFieldSelected ? "#eaf2ff" : undefined,
+                    boxShadow: isFieldActive ? "inset 0 0 0 1px #93c5fd" : undefined,
+                  }}
+                  onMouseDown={(e) => {
+                    if (isEditableTarget(e.target)) return;
+                    e.preventDefault();
+                    startCellSelection(rowIndex, 0);
+                  }}
+                  onMouseEnter={() => extendCellSelection(rowIndex, 0)}
                 >
+                  <button
+                    type="button"
+                    draggable
+                    style={rowDragHandleStyle}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                    }}
+                    onDragStart={(e) => {
+                      e.stopPropagation();
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", row.id);
+                      setDragRowId(row.id);
+                    }}
+                    onDragEnd={() => {
+                      setDragRowId(null);
+                      setDropRowId(null);
+                    }}
+                    title="드래그해서 행 순서 변경"
+                  >
+                    ≡
+                  </button>
                   <div>{row.field}</div>
                 </div>
-                <div style={sheetValueCellStyle}>
+                <div
+                  style={{
+                    ...sheetValueCellStyle,
+                    background: isValueSelected ? "#eaf2ff" : undefined,
+                    boxShadow: isValueActive ? "inset 0 0 0 1px #93c5fd" : undefined,
+                  }}
+                  onMouseDown={(e) => {
+                    if (isEditableTarget(e.target)) return;
+                    e.preventDefault();
+                    startCellSelection(rowIndex, 1);
+                  }}
+                  onMouseEnter={() => extendCellSelection(rowIndex, 1)}
+                >
                   {editingRowId === row.id ? (
                     getSingleSelectOptionsByRowId(row.id) ? (
-                      <select
-                        autoFocus
-                        disabled={frozen}
-                        value={
-                          row.id === "target"
-                            ? data.target[0] ?? ""
-                            : row.id === "result_state"
-                              ? data.result_state
-                              : row.id === "ai_min_role"
-                                ? data.ai_min_role
-                              : row.id === "no_ai_alternative"
-                                ? data.no_ai_alternative[0] ?? ""
-                                : row.id === "exposure"
-                                  ? data.exposure
-                                  : row.id === "reversibility"
-                                    ? data.reversibility
-                                    : row.id === "impact"
-                                      ? data.impact
-                                      : data.hitl
-                        }
-                        onChange={(e) => updateTableCell(row.id, e.target.value)}
-                        onBlur={() => setEditingRowId(null)}
-                        style={sheetSelectStyle}
-                      >
-                        <option value="">선택</option>
-                        {getSingleSelectOptionsByRowId(row.id)?.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
+                      <div style={sheetDropdownWrapStyle}>
+                        <button
+                          type="button"
+                          style={sheetDropdownTriggerStyle}
+                          onMouseDown={(e) => e.stopPropagation()}
+                        >
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              color: getSingleValueByRowId(row.id, data) ? "#1f2937" : "#9ca3af",
+                            }}
+                          >
+                            {(() => {
+                              const current = getSingleValueByRowId(row.id, data);
+                              const options = getSingleSelectOptionsByRowId(row.id) ?? [];
+                              const selected = options.find((o) => o.value === current);
+                              return selected?.label ?? "선택";
+                            })()}
+                          </span>
+                          <svg
+                            viewBox="0 0 20 20"
+                            aria-hidden="true"
+                            style={sheetDropdownChevronStyle}
+                          >
+                            <path d="M5.5 7.5L10 12l4.5-4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                        <div style={sheetDropdownMenuStyle} onMouseDown={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            style={sheetDropdownOptionStyle}
+                            onClick={() => {
+                              updateTableCell(row.id, "");
+                              setEditingRowId(null);
+                            }}
+                          >
+                            선택
+                          </button>
+                          {(getSingleSelectOptionsByRowId(row.id) ?? []).map((option) => {
+                            const selected = getSingleValueByRowId(row.id, data) === option.value;
+                            return (
+                              <button
+                                key={option.value}
+                                type="button"
+                                style={{
+                                  ...sheetDropdownOptionStyle,
+                                  background: selected ? "#eff6ff" : "#fff",
+                                  color: selected ? "#1d4ed8" : "#1f2937",
+                                  fontWeight: selected ? 700 : 500,
+                                }}
+                                onClick={() => {
+                                  updateTableCell(row.id, option.value);
+                                  setEditingRowId(null);
+                                }}
+                              >
+                                {option.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     ) : (
                       <textarea
                         autoFocus
@@ -778,7 +1277,7 @@ export default function ScreeningPage() {
                         onBlur={() => setEditingRowId(null)}
                         disabled={frozen}
                         style={sheetValueInputStyle}
-                        placeholder="입력"
+                        placeholder={getValueExampleByRowId(row.id)}
                       />
                     )
                   ) : (
@@ -790,21 +1289,47 @@ export default function ScreeningPage() {
                       }}
                       title="더블클릭 또는 Enter로 편집"
                     >
-                      {row.value || "입력"}
+                      {getSingleSelectOptionsByRowId(row.id) ? (
+                        <div style={sheetValueSelectDisplayStyle}>
+                          <span style={row.value ? undefined : sheetValuePlaceholderStyle}>{row.value || "선택"}</span>
+                          <svg viewBox="0 0 20 20" aria-hidden="true" style={sheetDropdownChevronStyle}>
+                            <path d="M5.5 7.5L10 12l4.5-4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </div>
+                      ) : row.value ? (
+                        row.value
+                      ) : (
+                        <span style={sheetValuePlaceholderStyle}>
+                          {getValueExampleByRowId(row.id)}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
-                <div style={sheetNoteCellStyle}>{row.note || ""}</div>
+                <div
+                  style={{
+                    ...sheetNoteCellStyle,
+                    background: isNoteSelected ? "#eaf2ff" : undefined,
+                    boxShadow: isNoteActive ? "inset 0 0 0 1px #93c5fd" : undefined,
+                  }}
+                  onMouseDown={(e) => {
+                    if (isEditableTarget(e.target)) return;
+                    e.preventDefault();
+                    startCellSelection(rowIndex, 2);
+                  }}
+                  onMouseEnter={() => extendCellSelection(rowIndex, 2)}
+                >
+                  <textarea
+                    value={row.note || ""}
+                    onChange={(e) => updateTableNote(row.id, e.target.value)}
+                    style={sheetNoteInputStyle}
+                    placeholder={getNotePlaceholderByRowId(row.id)}
+                  />
+                </div>
               </div>
             );
             })}
           </div>
-        )}
-
-        {!frozen && missingForFreeze.length > 0 && (
-          <p style={{ ...subtleStyle, marginTop: 8 }}>
-            Freeze 전 필수 입력: {missingForFreeze.join(", ")}
-          </p>
         )}
 
         {message && <p style={{ ...subtleStyle, marginTop: 10 }}>{message}</p>}
@@ -849,32 +1374,46 @@ export default function ScreeningPage() {
           <>
             <p style={{ ...subtleStyle, marginTop: 8 }}>입력값이 구조로 실시간 반영됩니다.</p>
             <div style={previewFrameStyle}>
-              <PreviewSection title="[STRATEGY]">
-                <PreviewItem label="목적 (Purpose)" value={data.why.trim() || "미입력"} />
-                <PreviewItem label="대상 사용자 (Target)" value={targetSummary} />
-                <PreviewItem label="결과 상태 (Result State)" value={resultStateSummary} />
-                <PreviewItem label="성공 가설 (KPI Hypothesis)" value={kpiSummary} />
+              <PreviewSection
+                title="실행 구조"
+                badge={PREVIEW_AREA_META.automation}
+                active={activePreviewArea === "automation"}
+                onClick={() => setActivePreviewArea("automation")}
+              >
+                <PreviewItem label="AI 작업 유형 (AI Task Types)" value={aiTaskTypesSummary} />
+                <PreviewItem label="초안 자동 생성 (Draft Generation)" value={autoDraftStatus} />
+                <PreviewItem label="자동 게시 (Auto Publish)" value={autoPublishStatus} />
+                <PreviewItem label="사전 검토 단계 (Pre Review)" value={preReviewStatus} />
+                <PreviewItem label="조건부 자동 승인 (Conditional Auto Approve)" value={conditionalAutoApproveStatus} />
               </PreviewSection>
 
-              <PreviewSection title="[OPERATIONAL POLICY]">
+              <PreviewSection
+                title="상태 모델"
+                badge={PREVIEW_AREA_META.state_flow}
+                active={activePreviewArea === "state_flow"}
+                onClick={() => setActivePreviewArea("state_flow")}
+              >
+                <div style={previewFlowStyle}>{stateFlow.map((node) => (node === stateFlow[0] ? node : `-> ${node}`)).join("\n")}</div>
+              </PreviewSection>
+
+              <PreviewSection
+                title="통제 지점"
+                badge={PREVIEW_AREA_META.policy}
+                active={activePreviewArea === "policy"}
+                onClick={() => setActivePreviewArea("policy")}
+              >
                 <PreviewItem label="노출 범위 (Exposure)" value={exposureSummary} />
                 <PreviewItem label="되돌림 가능성 (Reversibility)" value={reversibilitySummary} />
                 <PreviewItem label="실패 비용 위치 (Impact)" value={impactSummary} />
                 <PreviewItem label="인간 개입 시점 (HITL)" value={hitlSummary} />
               </PreviewSection>
 
-              <PreviewSection title="[AUTOMATION BOUNDARY]">
-                <PreviewItem label="초안 자동 생성 (Draft Generation)" value={autoDraft ? "ENABLED" : "DISABLED"} />
-                <PreviewItem label="자동 게시 (Auto Publish)" value={autoPublish ? "ENABLED" : "DISABLED"} />
-                <PreviewItem label="사전 검토 단계 (Pre Review)" value={manualReviewRequired ? "REQUIRED" : "NOT REQUIRED"} />
-                <PreviewItem label="조건부 자동 승인 (Conditional Auto Approve)" value={autoPublish ? "ALLOWED" : "NOT ALLOWED"} />
-              </PreviewSection>
-
-              <PreviewSection title="[STATE FLOW]">
-                <div style={previewFlowStyle}>{stateFlow.map((node) => (node === stateFlow[0] ? node : `-> ${node}`)).join("\n")}</div>
-              </PreviewSection>
-
-              <PreviewSection title="[RISK PROFILE]" isLast>
+              <PreviewSection
+                title="리스크 영향"
+                badge={PREVIEW_AREA_META.risk_profile}
+                active={activePreviewArea === "risk_profile"}
+                onClick={() => setActivePreviewArea("risk_profile")}
+              >
                 <PreviewItem label="Calculated Risk Level" value={riskLevel.toUpperCase()} />
                 <div style={previewReasonStyle}>근거:</div>
                 <ul style={previewReasonListStyle}>
@@ -882,6 +1421,19 @@ export default function ScreeningPage() {
                     <li key={reason}>- {reason}</li>
                   ))}
                 </ul>
+              </PreviewSection>
+
+              <PreviewSection
+                title="기획 의도"
+                badge={PREVIEW_AREA_META.strategy}
+                active={activePreviewArea === "strategy"}
+                onClick={() => setActivePreviewArea("strategy")}
+                isLast
+              >
+                <PreviewItem label="목적 (Purpose)" value={data.why.trim() || "미입력"} />
+                <PreviewItem label="대상 사용자 (Target)" value={targetSummary} />
+                <PreviewItem label="결과 상태 (Result State)" value={resultStateSummary} />
+                <PreviewItem label="성공 가설 (KPI Hypothesis)" value={kpiSummary} />
               </PreviewSection>
             </div>
           </>
@@ -927,21 +1479,39 @@ export default function ScreeningPage() {
   );
 }
 
-function QuestionRow({ question, children }: { question: string; children: React.ReactNode }) {
+function PreviewSection({
+  title,
+  children,
+  isLast = false,
+  active = false,
+  onClick,
+  badge,
+}: {
+  title: string;
+  children: React.ReactNode;
+  isLast?: boolean;
+  active?: boolean;
+  onClick?: () => void;
+  badge?: { bg: string; fg: string; border: string };
+}) {
   return (
-    <div style={questionRowStyle}>
-      <div style={questionLabelStyle}>
-        <div>{question}</div>
+    <section
+      onClick={onClick}
+      style={{
+        ...previewSectionStyle,
+        borderBottom: isLast ? "none" : previewSectionStyle.borderBottom,
+        background: active ? "#f8fbff" : undefined,
+        boxShadow: active ? "inset 3px 0 0 #60a5fa" : undefined,
+        cursor: onClick ? "pointer" : "default",
+      }}
+    >
+      <div style={previewSectionTitleStyle}>
+        {badge ? (
+          <span style={{ ...previewBadgeStyle, background: badge.bg, color: badge.fg, borderColor: badge.border }}>{title}</span>
+        ) : (
+          title
+        )}
       </div>
-      <div style={questionInputStyle}>{children}</div>
-    </div>
-  );
-}
-
-function PreviewSection({ title, children, isLast = false }: { title: string; children: React.ReactNode; isLast?: boolean }) {
-  return (
-    <section style={{ ...previewSectionStyle, borderBottom: isLast ? "none" : previewSectionStyle.borderBottom }}>
-      <div style={previewSectionTitleStyle}>{title}</div>
       <div style={previewSectionBodyStyle}>{children}</div>
     </section>
   );
@@ -1103,6 +1673,9 @@ const sheetFieldCellStyle: CSSProperties = {
   fontSize: 13,
   fontWeight: 600,
   color: "#374151",
+  display: "flex",
+  alignItems: "flex-start",
+  gap: 8,
 };
 
 const sheetValueCellStyle: CSSProperties = {
@@ -1114,6 +1687,19 @@ const sheetNoteCellStyle: CSSProperties = {
   padding: "10px 12px",
   fontSize: 12,
   color: "#6b7280",
+};
+
+const sheetNoteInputStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 52,
+  border: "none",
+  outline: "none",
+  resize: "vertical",
+  background: "transparent",
+  fontSize: 13,
+  lineHeight: 1.45,
+  color: "#374151",
+  fontFamily: "inherit",
 };
 
 const sheetValueInputStyle: CSSProperties = {
@@ -1139,6 +1725,17 @@ const sheetValueDisplayStyle: CSSProperties = {
   cursor: "cell",
 };
 
+const sheetValuePlaceholderStyle: CSSProperties = {
+  color: "#9ca3af",
+};
+
+const sheetValueSelectDisplayStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+};
+
 const sheetSelectStyle: CSSProperties = {
   width: "100%",
   minHeight: 52,
@@ -1149,6 +1746,78 @@ const sheetSelectStyle: CSSProperties = {
   color: "#1f2937",
   background: "#fff",
   fontFamily: "inherit",
+};
+
+const sheetDropdownWrapStyle: CSSProperties = {
+  position: "relative",
+  width: "100%",
+  minHeight: 52,
+  padding: "6px 8px",
+  background: "#fff",
+};
+
+const sheetDropdownTriggerStyle: CSSProperties = {
+  width: "100%",
+  height: 38,
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  background: "#fff",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  padding: "0 10px",
+  fontSize: 14,
+  color: "#1f2937",
+};
+
+const sheetDropdownChevronStyle: CSSProperties = {
+  width: 14,
+  height: 14,
+  color: "#64748b",
+  opacity: 0.5,
+  marginLeft: 8,
+  flexShrink: 0,
+};
+
+const sheetDropdownMenuStyle: CSSProperties = {
+  position: "absolute",
+  top: 46,
+  left: 8,
+  right: 8,
+  border: "1px solid #d1d5db",
+  borderRadius: 10,
+  background: "#fff",
+  boxShadow: "0 10px 24px rgba(15, 23, 42, 0.14)",
+  padding: 6,
+  display: "grid",
+  gap: 4,
+  zIndex: 20,
+};
+
+const sheetDropdownOptionStyle: CSSProperties = {
+  border: "none",
+  borderRadius: 8,
+  background: "#fff",
+  textAlign: "left",
+  padding: "8px 10px",
+  fontSize: 14,
+  color: "#1f2937",
+  cursor: "pointer",
+};
+
+const rowDragHandleStyle: CSSProperties = {
+  border: "none",
+  borderRadius: 6,
+  background: "transparent",
+  color: "#9ca3af",
+  cursor: "grab",
+  fontSize: 14,
+  fontWeight: 700,
+  lineHeight: 1,
+  padding: "2px 4px",
+  marginTop: 0,
+  alignSelf: "center",
+  flexShrink: 0,
 };
 
 const blockTitleStyle: CSSProperties = {
@@ -1162,10 +1831,35 @@ const blockTitleStyle: CSSProperties = {
 
 const questionRowStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "240px minmax(0, 1fr)",
+  gridTemplateColumns: "240px minmax(0, 1fr) 200px",
   gap: 12,
   padding: "12px",
   borderTop: "1px solid #f1f5f9",
+};
+
+const formHeaderRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "240px minmax(0, 1fr) 200px",
+  background: "#f3f4f6",
+  borderTop: "1px solid #e5e7eb",
+  borderBottom: "1px solid #e5e7eb",
+  fontSize: 12,
+  fontWeight: 700,
+  color: "#374151",
+};
+
+const formHeadFieldStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRight: "1px solid #d1d5db",
+};
+
+const formHeadValueStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRight: "1px solid #d1d5db",
+};
+
+const formHeadNoteStyle: CSSProperties = {
+  padding: "10px 12px",
 };
 
 const questionLabelStyle: CSSProperties = {
@@ -1179,6 +1873,25 @@ const questionLabelStyle: CSSProperties = {
 const questionInputStyle: CSSProperties = {
   display: "grid",
   gap: 8,
+};
+
+const formNoteCellStyle: CSSProperties = {
+  borderLeft: "1px solid #f1f5f9",
+  paddingLeft: 12,
+  minWidth: 0,
+};
+
+const formNoteInputStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 72,
+  border: "none",
+  outline: "none",
+  resize: "vertical",
+  background: "transparent",
+  fontSize: 13,
+  lineHeight: 1.45,
+  color: "#374151",
+  fontFamily: "inherit",
 };
 
 const choiceGroupStyle: CSSProperties = {
@@ -1195,12 +1908,12 @@ const choiceLabelStyle: CSSProperties = {
 };
 
 const inputStyle: CSSProperties = {
-  border: "1px solid #d6dbe2",
-  borderRadius: 8,
-  padding: "10px 12px",
+  border: "none",
+  borderRadius: 0,
+  padding: "2px 0",
   fontSize: 15,
   color: "#374151",
-  background: "#f9fafb",
+  background: "transparent",
   width: "100%",
 };
 
@@ -1224,6 +1937,16 @@ const previewFrameStyle: CSSProperties = {
   borderRadius: 10,
   background: "#fff",
   overflow: "hidden",
+};
+
+const previewBadgeStyle: CSSProperties = {
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 700,
+  lineHeight: 1.2,
+  padding: "5px 10px",
 };
 
 const previewSectionStyle: CSSProperties = {
