@@ -36,16 +36,14 @@ const TARGET_OPTIONS: Array<{ value: Step1Target; label: string }> = [
 ];
 
 const RESULT_STATE_OPTIONS: Array<{ value: Step1ResultState; label: string }> = [
-  { value: "draft_saved", label: "초안 생성/저장" },
+  { value: "draft_saved", label: "초안 저장" },
   { value: "status_changed", label: "상태 변경" },
-  { value: "review_requested", label: "검토/승인 요청 생성" },
-  { value: "published_or_executed", label: "외부 게시/실행 완료" },
-  { value: "reference_saved", label: "내부 참고자료/리포트 저장" },
-  { value: "action_triggered", label: "알림/후속 액션 트리거" },
-  { value: "task_created", label: "티켓/작업 생성" },
-  { value: "ephemeral_response", label: "저장 없음(일회성 응답)" },
-  { value: "failed", label: "실패 기록" },
-  { value: "cancelled", label: "취소/중단" },
+  { value: "review_requested", label: "승인 요청 생성" },
+  { value: "published_or_executed", label: "게시/실행 완료" },
+  { value: "reference_saved", label: "리포트 저장" },
+  { value: "action_triggered", label: "알림 트리거" },
+  { value: "task_created", label: "작업 생성" },
+  { value: "ephemeral_response", label: "일회성 응답 (저장 없음)" },
 ];
 
 const AI_MIN_ROLE_OPTIONS: Array<{ value: Step1AiMinRole; label: string }> = [
@@ -54,12 +52,12 @@ const AI_MIN_ROLE_OPTIONS: Array<{ value: Step1AiMinRole; label: string }> = [
 ];
 
 const AI_TASK_TYPE_OPTIONS: Array<{ value: Step1AiTaskType; label: string }> = [
-  { value: "input_structuring", label: "입력 정리" },
   { value: "draft_generation", label: "초안 생성" },
   { value: "candidate_suggestion", label: "후보 제시" },
+  { value: "auto_execution", label: "개선 제안" },
+  { value: "no_intervention", label: "정책 점검" },
+  { value: "input_structuring", label: "분류" },
   { value: "approval_assist", label: "승인 보조" },
-  { value: "auto_execution", label: "자동 실행" },
-  { value: "no_intervention", label: "개입 없음" },
 ];
 
 const EXPOSURE_OPTIONS: Array<{ value: Step1Exposure; label: string }> = [
@@ -171,7 +169,7 @@ const PREVIEW_AREA_META: Record<
     rowIds: ["exposure", "reversibility", "impact", "hitl"],
   },
   automation: {
-    label: "실행 구조",
+    label: "실행 방식",
     bg: "#f3e8ff",
     fg: "#6b21a8",
     border: "#d8b4fe",
@@ -518,12 +516,10 @@ export default function ScreeningPage() {
   }, [isSelecting]);
 
   function update<K extends keyof Step1Data>(key: K, value: Step1Data[K]) {
-    if (frozen) return;
     setData((prev) => ({ ...prev, [key]: value }));
   }
 
   function toggleMultiValue(key: "target", value: Step1Data["target"][number]) {
-    if (frozen) return;
     setData((prev) => {
       const current = prev[key];
       const exists = current.includes(value);
@@ -533,7 +529,6 @@ export default function ScreeningPage() {
   }
 
   function updateTableCell(rowId: Step1TableRowId, rawValue: string) {
-    if (frozen) return;
     setData((prev) => {
       switch (rowId) {
         case "why":
@@ -694,7 +689,7 @@ export default function ScreeningPage() {
       setSelectionRange({ start: { row: 0, col: 0 }, end: { row: tableRows.length - 1, col: 2 } });
       setMessage("표 전체 셀 선택");
     }
-    if (e.key === "Enter" && activeCell && !frozen) {
+    if (e.key === "Enter" && activeCell) {
       e.preventDefault();
       if (activeCell.col === 1) {
         setEditingRowId(tableRows[activeCell.row]?.id ?? null);
@@ -748,7 +743,7 @@ export default function ScreeningPage() {
           <textarea
             value={data.why}
             onChange={(e) => update("why", e.target.value)}
-            disabled={frozen}
+            disabled={false}
             placeholder="ex) 반복 작업 자동화로 작성 시간을 줄이고 일관성을 높임"
             style={{ ...inputStyle, minHeight: 84 }}
           />
@@ -762,7 +757,7 @@ export default function ScreeningPage() {
                   type="checkbox"
                   checked={data.target.includes(option.value)}
                   onChange={() => toggleMultiValue("target", option.value)}
-                  disabled={frozen}
+                  disabled={false}
                 />
                 {option.label}
               </label>
@@ -774,7 +769,7 @@ export default function ScreeningPage() {
           <textarea
             value={data.as_is}
             onChange={(e) => update("as_is", e.target.value)}
-            disabled={frozen}
+            disabled={false}
             placeholder="ex) 게시글 초안 작성 시간이 오래 걸리고 톤 일관성이 떨어짐"
             style={{ ...inputStyle, minHeight: 84 }}
           />
@@ -789,7 +784,7 @@ export default function ScreeningPage() {
                   name="result_state"
                   checked={data.result_state === option.value}
                   onChange={() => update("result_state", option.value)}
-                  disabled={frozen}
+                  disabled={false}
                 />
                 {option.label}
               </label>
@@ -812,7 +807,7 @@ export default function ScreeningPage() {
                         : [...data.ai_task_types, option.value]
                     )
                   }
-                  disabled={frozen}
+                  disabled={false}
                 />
                 {option.label}
               </label>
@@ -824,7 +819,7 @@ export default function ScreeningPage() {
           <textarea
             value={data.no_ai_alternative_detail}
             onChange={(e) => update("no_ai_alternative_detail", e.target.value)}
-            disabled={frozen}
+            disabled={false}
             placeholder="ex) 템플릿 기반 수동 작성"
             style={{ ...inputStyle, minHeight: 84 }}
           />
@@ -839,7 +834,7 @@ export default function ScreeningPage() {
                   name="exposure"
                   checked={data.exposure === option.value}
                   onChange={() => update("exposure", option.value)}
-                  disabled={frozen}
+                  disabled={false}
                 />
                 {option.label}
               </label>
@@ -856,7 +851,7 @@ export default function ScreeningPage() {
                   name="reversibility"
                   checked={data.reversibility === option.value}
                   onChange={() => update("reversibility", option.value)}
-                  disabled={frozen}
+                  disabled={false}
                 />
                 {option.label}
               </label>
@@ -873,7 +868,7 @@ export default function ScreeningPage() {
                   name="impact"
                   checked={data.impact === option.value}
                   onChange={() => update("impact", option.value)}
-                  disabled={frozen}
+                  disabled={false}
                 />
                 {option.label}
               </label>
@@ -890,7 +885,7 @@ export default function ScreeningPage() {
                   name="hitl"
                   checked={data.hitl === option.value}
                   onChange={() => update("hitl", option.value)}
-                  disabled={frozen}
+                  disabled={false}
                 />
                 {option.label}
               </label>
@@ -902,7 +897,7 @@ export default function ScreeningPage() {
           <textarea
             value={data.kpi}
             onChange={(e) => update("kpi", e.target.value)}
-            disabled={frozen}
+            disabled={false}
             placeholder="ex) 작성 시간 10% 단축 → 발행 빈도 증가"
             style={{ ...inputStyle, minHeight: 84 }}
           />
@@ -1003,14 +998,14 @@ export default function ScreeningPage() {
           <div style={headerActionStyle}>
             <button
               onClick={handleSave}
-              disabled={frozen || !isDirty}
+              disabled={!isDirty}
               style={{
                 ...buttonStyle,
-                color: isDirty && !frozen ? "#2563eb" : "#6b7280",
-                borderColor: isDirty && !frozen ? "#93c5fd" : "#d6dbe2",
-                background: isDirty && !frozen ? "#eff6ff" : "#f8fafc",
-                cursor: frozen || !isDirty ? "not-allowed" : "pointer",
-                opacity: frozen || !isDirty ? 0.7 : 1,
+                color: isDirty ? "#2563eb" : "#6b7280",
+                borderColor: isDirty ? "#93c5fd" : "#d6dbe2",
+                background: isDirty ? "#eff6ff" : "#f8fafc",
+                cursor: !isDirty ? "not-allowed" : "pointer",
+                opacity: !isDirty ? 0.7 : 1,
               }}
             >
               저장
@@ -1018,7 +1013,7 @@ export default function ScreeningPage() {
             <button onClick={handleFreeze} disabled={frozen || !freezeReady} style={buttonStyle}>
               확정하기
             </button>
-            {frozen && <span style={{ ...subtleStyle, alignSelf: "center" }}>🔒 확정됨</span>}
+            {frozen && <span style={{ ...subtleStyle, alignSelf: "center" }}>🔒 확정됨(수정 가능)</span>}
           </div>
         </div>
 
@@ -1205,7 +1200,62 @@ export default function ScreeningPage() {
                   onMouseEnter={() => extendCellSelection(rowIndex, 1)}
                 >
                   {editingRowId === row.id ? (
-                    getSingleSelectOptionsByRowId(row.id) ? (
+                    row.id === "ai_task_types" ? (
+                      <div style={sheetDropdownWrapStyle}>
+                        <button
+                          type="button"
+                          style={sheetDropdownTriggerStyle}
+                          onMouseDown={(e) => e.stopPropagation()}
+                        >
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              color: row.value ? "#1f2937" : "#9ca3af",
+                            }}
+                          >
+                            {row.value || "선택"}
+                          </span>
+                          <svg
+                            viewBox="0 0 20 20"
+                            aria-hidden="true"
+                            style={sheetDropdownChevronStyle}
+                          >
+                            <path d="M5.5 7.5L10 12l4.5-4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                        <div style={sheetDropdownMenuStyle} onMouseDown={(e) => e.stopPropagation()}>
+                          {AI_TASK_TYPE_OPTIONS.map((option) => {
+                            const checked = data.ai_task_types.includes(option.value);
+                            return (
+                              <label key={option.value} style={sheetMultiOptionItemStyle}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    update(
+                                      "ai_task_types",
+                                      checked
+                                        ? data.ai_task_types.filter((v) => v !== option.value)
+                                        : [...data.ai_task_types, option.value]
+                                    );
+                                  }}
+                                />
+                                <span>{option.label}</span>
+                              </label>
+                            );
+                          })}
+                          <button
+                            type="button"
+                            style={sheetMultiDoneButtonStyle}
+                            onClick={() => setEditingRowId(null)}
+                          >
+                            완료
+                          </button>
+                        </div>
+                      </div>
+                    ) : getSingleSelectOptionsByRowId(row.id) ? (
                       <div style={sheetDropdownWrapStyle}>
                         <button
                           type="button"
@@ -1275,7 +1325,7 @@ export default function ScreeningPage() {
                         value={row.value}
                         onChange={(e) => updateTableCell(row.id, e.target.value)}
                         onBlur={() => setEditingRowId(null)}
-                        disabled={frozen}
+                        disabled={false}
                         style={sheetValueInputStyle}
                         placeholder={getValueExampleByRowId(row.id)}
                       />
@@ -1284,12 +1334,11 @@ export default function ScreeningPage() {
                     <div
                       style={sheetValueDisplayStyle}
                       onDoubleClick={() => {
-                        if (frozen) return;
                         setEditingRowId(row.id);
                       }}
                       title="더블클릭 또는 Enter로 편집"
                     >
-                      {getSingleSelectOptionsByRowId(row.id) ? (
+                      {getSingleSelectOptionsByRowId(row.id) || row.id === "ai_task_types" ? (
                         <div style={sheetValueSelectDisplayStyle}>
                           <span style={row.value ? undefined : sheetValuePlaceholderStyle}>{row.value || "선택"}</span>
                           <svg viewBox="0 0 20 20" aria-hidden="true" style={sheetDropdownChevronStyle}>
@@ -1375,7 +1424,7 @@ export default function ScreeningPage() {
             <p style={{ ...subtleStyle, marginTop: 8 }}>입력값이 구조로 실시간 반영됩니다.</p>
             <div style={previewFrameStyle}>
               <PreviewSection
-                title="실행 구조"
+                title="실행 방식"
                 badge={PREVIEW_AREA_META.automation}
                 active={activePreviewArea === "automation"}
                 onClick={() => setActivePreviewArea("automation")}
@@ -1803,6 +1852,28 @@ const sheetDropdownOptionStyle: CSSProperties = {
   fontSize: 14,
   color: "#1f2937",
   cursor: "pointer",
+};
+
+const sheetMultiOptionItemStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  borderRadius: 8,
+  padding: "8px 10px",
+  fontSize: 14,
+  color: "#1f2937",
+};
+
+const sheetMultiDoneButtonStyle: CSSProperties = {
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  background: "#f8fafc",
+  color: "#374151",
+  fontSize: 13,
+  fontWeight: 600,
+  padding: "7px 10px",
+  cursor: "pointer",
+  justifySelf: "end",
 };
 
 const rowDragHandleStyle: CSSProperties = {
