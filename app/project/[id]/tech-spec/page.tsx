@@ -2,10 +2,9 @@
 
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   addHistoryEvent,
-  canAccessTechSpec,
   generateTechSpecRows,
   getStep4Rows,
   HISTORY_EVENT_TYPES,
@@ -56,6 +55,7 @@ const DIAGRAM_TAB_META: Record<DiagramTab, { label: string; bg: string; fg: stri
 
 export default function TechSpecPage() {
   const params = useParams();
+  const router = useRouter();
   const id = String(params?.id ?? "");
 
   const [locked, setLocked] = useState(true);
@@ -75,9 +75,12 @@ export default function TechSpecPage() {
   useEffect(() => {
     if (!id) return;
     const progress = getProgress(id);
-    const canAccess = canAccessTechSpec(progress);
+    const canAccess = progress.step1Frozen;
     setLocked(!canAccess);
-    if (!canAccess) return;
+    if (!canAccess) {
+      router.replace(`/project/${id}/screening`);
+      return;
+    }
 
     const loadedStep1 = getStep1Data(id);
     const loadedStep2 = getStep2Data(id);
@@ -105,7 +108,7 @@ export default function TechSpecPage() {
       setStep4Rows(id, merged);
       setSelectedRowId((prev) => prev ?? merged[0]?.rowId ?? null);
     }
-  }, [id]);
+  }, [id, router]);
 
   function updateRow(rowId: Step4RowId, key: "spec" | "note", value: string) {
     setRows((prev) => prev.map((row) => (row.rowId === rowId ? { ...row, [key]: value } : row)));
@@ -333,7 +336,7 @@ export default function TechSpecPage() {
 
         {locked && (
           <div style={lockStyle}>
-            🔒 STEP3 완료 전에는 접근할 수 없습니다.
+            🔒 STEP1 확정 전에는 접근할 수 없습니다.
           </div>
         )}
 

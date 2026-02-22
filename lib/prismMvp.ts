@@ -51,6 +51,19 @@ export type Step2Data = {
   data_storage: string;
   log_fields: string;
   cost_strategy: string;
+  notes: Record<
+    | "status_model"
+    | "user_flow"
+    | "ai_intervention"
+    | "system_process"
+    | "human_control"
+    | "failure_strategy"
+    | "delivery_mode"
+    | "data_storage"
+    | "log_fields"
+    | "cost_strategy",
+    string
+  >;
   reviewed: Record<
     | "status_model"
     | "user_flow"
@@ -149,6 +162,7 @@ export type HistoryStage = "step1" | "step2" | "step3" | "step4" | "system";
 
 export const HISTORY_EVENT_TYPES = {
   SAVE_STEP1: "SAVE_STEP1",
+  REGENERATE_STEP2_FROM_STEP1: "REGENERATE_STEP2_FROM_STEP1",
   GENERATE_STEP2_DRAFT: "GENERATE_STEP2_DRAFT",
   FREEZE_STEP1: "FREEZE_STEP1",
   SET_EXPOSURE: "SET_EXPOSURE",
@@ -263,6 +277,18 @@ const step2Schema = z.object({
   data_storage: z.string(),
   log_fields: z.string(),
   cost_strategy: z.string(),
+  notes: z.object({
+    status_model: z.string(),
+    user_flow: z.string(),
+    ai_intervention: z.string(),
+    system_process: z.string(),
+    human_control: z.string(),
+    failure_strategy: z.string(),
+    delivery_mode: z.string(),
+    data_storage: z.string(),
+    log_fields: z.string(),
+    cost_strategy: z.string(),
+  }),
   reviewed: z.object({
     status_model: z.boolean(),
     user_flow: z.boolean(),
@@ -319,6 +345,7 @@ const step4RowsSchema = z.array(step4RowSchema);
 
 const historyActionSchema = z.enum([
   HISTORY_EVENT_TYPES.SAVE_STEP1,
+  HISTORY_EVENT_TYPES.REGENERATE_STEP2_FROM_STEP1,
   HISTORY_EVENT_TYPES.GENERATE_STEP2_DRAFT,
   HISTORY_EVENT_TYPES.FREEZE_STEP1,
   HISTORY_EVENT_TYPES.SET_EXPOSURE,
@@ -559,6 +586,7 @@ function buildHistoryEvent(projectId: string, event: Omit<HistoryEvent, "id" | "
 
 const HISTORY_DEFAULT_SUMMARY: Record<HistoryEventAction, string> = {
   SAVE_STEP1: "STEP1 저장",
+  REGENERATE_STEP2_FROM_STEP1: "STEP1 기준 STEP2 재생성",
   GENERATE_STEP2_DRAFT: "STEP2 초안 생성",
   FREEZE_STEP1: "STEP1 확정 완료",
   SET_EXPOSURE: "노출 범위 변경",
@@ -652,6 +680,10 @@ function parseProgress(value: unknown): Partial<ProjectProgress> {
 
 function parseStep2(value: unknown): Partial<Step2Data> {
   if (!isRecord(value)) return {};
+  const notesSource = isRecord(value.notes) ? value.notes : isRecord(value.note) ? value.note : {};
+  const notes = Object.fromEntries(
+    STEP2_REVIEW_KEYS.map((k) => [k, asString(notesSource[k]) ?? ""])
+  ) as Step2Data["notes"];
   const reviewedSource = isRecord(value.reviewed) ? value.reviewed : {};
   const reviewed = Object.fromEntries(
     STEP2_REVIEW_KEYS.map((k) => [k, asBoolean(reviewedSource[k]) ?? false])
@@ -668,6 +700,7 @@ function parseStep2(value: unknown): Partial<Step2Data> {
     data_storage: asString(value.data_storage),
     log_fields: asString(value.log_fields),
     cost_strategy: asString(value.cost_strategy),
+    notes,
     reviewed,
   };
 }
@@ -777,6 +810,18 @@ export function getDefaultStep2(): Step2Data {
     data_storage: "",
     log_fields: "",
     cost_strategy: "",
+    notes: {
+      status_model: "",
+      user_flow: "",
+      ai_intervention: "",
+      system_process: "",
+      human_control: "",
+      failure_strategy: "",
+      delivery_mode: "",
+      data_storage: "",
+      log_fields: "",
+      cost_strategy: "",
+    },
     reviewed: {
       status_model: false,
       user_flow: false,
@@ -1005,11 +1050,54 @@ export function generateStep2Draft(step1: Step1Data): string {
 }
 
 export function generateStep2Data(step1: Step1Data): Step2Data {
-  const requiresPreReview = step1.hitl === "pre_review" || step1.impact === "high";
-  const canAutoPublish = step1.exposure !== "public" && step1.impact !== "high";
-  const statusModel = requiresPreReview
-    ? "input -> generating -> draft -> review_requested -> approved -> published (failed/rejected 별도 권장)"
-    : "input -> generating -> draft -> user_edit -> publish_requested -> published (failed/rejected 별도 권장)";
+  const taskSet = new Set(step1.ai_task_types);
+  const hasDraftGeneration = taskSet.has("draft_generation");
+  const hasCandidateSuggestion = taskSet.has("candidate_suggestion");
+  const hasRevisionSuggestion = taskSet.has("revision_suggestion");
+  const hasPolicyCheck = taskSet.has("policy_check");
+  const hasClassification = taskSet.has("classification");
+  const hasApprovalAssist = taskSet.has("approval_assist");
+
+  const requiresPreReview = step1.hitl === "pre_review" || step1.result_state === "review_requested";
+  const canAutoPublish = step1.result_state === "published_or_executed" && step1.exposure !== "public" && step1.impact !== "high" && step1.hitl !== "pre_review";
+
+  const statusParts: string[] = ["input", "generating"];
+  if (hasDraftGeneration) statusParts.push("draft");
+  if (requiresPreReview) statusParts.push("review_required");
+  if (step1.result_state === "review_requested") {
+    statusParts.push("approved");
+  }
+  if (step1.result_state) {
+    statusParts.push(step1.result_state);
+  } else if (hasDraftGeneration) {
+    statusParts.push("draft_saved");
+  }
+  const statusModel = `${statusParts.join(" -> ")} (failed/rejected 별도 권장)`;
+
+  const aiInterventions: string[] = [];
+  if (hasDraftGeneration) aiInterventions.push("draft_generation: 입력 완료 시 초안 생성");
+  if (hasCandidateSuggestion) aiInterventions.push("candidate_suggestion: 후보 제시 버튼 트리거");
+  if (hasRevisionSuggestion) aiInterventions.push("revision_suggestion: 개선 제안 버튼 트리거");
+  if (hasPolicyCheck) aiInterventions.push("policy_check: 정책 점검 실행 트리거");
+  if (hasClassification) aiInterventions.push("classification: 입력 분류 자동 처리");
+  if (hasApprovalAssist) aiInterventions.push("approval_assist: 승인 단계 보조");
+  const aiIntervention =
+    aiInterventions.length > 0
+      ? aiInterventions.join(" / ")
+      : "ai_task_types 미선택: 사용자 트리거 기반 수동 실행";
+
+  const flowSteps: string[] = ["프로젝트 생성", "입력 작성"];
+  if (hasDraftGeneration) flowSteps.push("초안 생성");
+  if (hasCandidateSuggestion) flowSteps.push("후보 제시");
+  if (hasRevisionSuggestion) flowSteps.push("개선 제안");
+  if (hasPolicyCheck) flowSteps.push("정책 점검");
+  if (hasClassification) flowSteps.push("입력 분류");
+  if (requiresPreReview) flowSteps.push("사전 검토");
+  if (hasApprovalAssist) flowSteps.push("승인 보조");
+  if (step1.result_state) {
+    flowSteps.push(`결과 기록(${step1.result_state})`);
+  }
+
   const exposurePolicy =
     step1.exposure === "public"
       ? "외부 공개 단계는 승인(휴먼 검토) 필수"
@@ -1022,14 +1110,29 @@ export function generateStep2Data(step1: Step1Data): Step2Data {
       : step1.impact === "medium"
         ? "오류율/응답시간/사용자 수정률 기본 모니터링"
         : "오류율/응답시간 경량 모니터링";
+
+  const hitlPolicy =
+    step1.hitl === "pre_review"
+      ? "사전 리뷰(pre_review) 후 적용"
+      : step1.hitl === "post_monitoring"
+        ? "적용 후 모니터링(post_monitoring) 기반 운영"
+        : "인간 개입 없음(none), 서버 정책 게이트로만 통제";
+
+  const failureSuffix =
+    step1.impact === "high" || step1.exposure === "public"
+      ? " / 고위험·외부노출: 자동 중단 + 운영 알림 + 사용자 노출 제한"
+      : step1.reversibility === "irreversible"
+        ? " / 되돌림 어려움: 승인 전 검증 강화 + 수동 승인 우선"
+        : "";
+
   return {
     ...getDefaultStep2(),
     status_model: statusModel,
-    user_flow: "프로젝트 생성 -> 입력 작성 -> AI 초안 생성 -> 수정 -> 게시 요청",
-    ai_intervention: "입력 완료 시 draft 단계에서 자동 초안 생성",
-    system_process: `입력값 검증 -> AI 호출 -> 결과 저장 -> 상태 draft 변경 (실패 시 failed), 정책: ${exposurePolicy}`,
-    human_control: `${requiresPreReview ? "사전 리뷰(pre_review) 후 게시 가능" : "게시 후 모니터링(post_monitoring) 기반 운영"} (AI 최소 역할: ${step1.ai_min_role || "draft_only"})`,
-    failure_strategy: "AI 실패 시 1회 재시도 -> 실패 시 알림 및 수동 모드 전환 (idempotent 처리)",
+    user_flow: flowSteps.join(" -> "),
+    ai_intervention: aiIntervention,
+    system_process: `입력값 검증 -> AI 호출/트리거 실행 -> 결과 저장 -> 상태 반영 (실패 시 failed), 정책: ${exposurePolicy}`,
+    human_control: `${hitlPolicy} (AI 최소 역할: ${step1.ai_min_role || "draft_only"})`,
+    failure_strategy: `AI 실패 시 1회 재시도 -> 실패 시 알림 및 수동 모드 전환 (idempotent 처리)${failureSuffix}`,
     delivery_mode: "화면에 초안 + 상태 배지(draft) 노출, 저장 완료 후 노출",
     data_storage: "post_drafts 저장 + confidence + version 필드",
     log_fields: "input/output/model_version/call_time/latency/error_code",

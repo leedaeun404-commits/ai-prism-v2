@@ -2,10 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   addHistoryEvent,
-  canAccessPolicy,
   canCompleteStep3,
   HISTORY_EVENT_TYPES,
   getProgress,
@@ -38,6 +37,7 @@ const STEP3_FIELDS: Array<{ key: Step3FieldKey; label: string }> = [
 
 export default function PolicyPage() {
   const params = useParams();
+  const router = useRouter();
   const id = String(params?.id ?? "");
 
   const [locked, setLocked] = useState(true);
@@ -51,9 +51,12 @@ export default function PolicyPage() {
   useEffect(() => {
     if (!id) return;
     const progress = getProgress(id);
-    const canAccess = canAccessPolicy(progress);
+    const canAccess = progress.step1Frozen;
     setLocked(!canAccess);
-    if (!canAccess) return;
+    if (!canAccess) {
+      router.replace(`/project/${id}/screening`);
+      return;
+    }
 
     const step1 = getStep1Data(id);
     const step2 = getStep2Data(id);
@@ -73,7 +76,7 @@ export default function PolicyPage() {
 
     setPolicy(merged);
     setStep3Policy(id, merged);
-  }, [id]);
+  }, [id, router]);
 
   useEffect(() => {
     if (!isResizing) return;
@@ -144,7 +147,7 @@ export default function PolicyPage() {
       <section style={mainPanelStyle}>
         <h1 style={titleStyle}>STEP 3 자동화/리스크</h1>
 
-        {locked && <div style={lockStyle}>🔒 STEP2 저장 완료 전에는 접근할 수 없습니다.</div>}
+        {locked && <div style={lockStyle}>🔒 STEP1 확정 전에는 접근할 수 없습니다.</div>}
 
         <p style={subtleStyle}>STEP2 검토 결과를 기반으로 정책 초안이 자동 생성됩니다.</p>
         <div style={policyMeaningStyle}>
@@ -152,17 +155,35 @@ export default function PolicyPage() {
         </div>
 
         {policy && (
-          <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+          <div style={sheetWrapStyle}>
+            <div style={sheetHeaderRowStyle}>
+              <div style={sheetHeadFieldStyle}>Field</div>
+              <div style={sheetHeadValueStyle}>Value</div>
+              <div style={sheetHeadNoteStyle}>Note</div>
+            </div>
             {STEP3_FIELDS.map((field) => (
-              <Step3FieldRow
-                key={field.key}
-                label={field.label}
-                value={policy[field.key]}
-                reviewed={policy.reviewed[field.key]}
-                disabled={locked}
-                onChange={(v) => updateField(field.key, v)}
-                onToggle={() => toggleReviewed(field.key)}
-              />
+              <div key={field.key} style={sheetDataRowStyle}>
+                <div style={sheetFieldCellStyle}>{field.label}</div>
+                <div style={sheetValueCellStyle}>
+                  <textarea
+                    value={policy[field.key]}
+                    onChange={(e) => updateField(field.key, e.target.value)}
+                    disabled={locked}
+                    style={sheetValueInputStyle}
+                  />
+                </div>
+                <div style={sheetNoteCellStyle}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#6b7280" }}>
+                    <input
+                      type="checkbox"
+                      checked={policy.reviewed[field.key]}
+                      onChange={() => toggleReviewed(field.key)}
+                      disabled={locked}
+                    />
+                    검토 완료
+                  </label>
+                </div>
+              </div>
             ))}
           </div>
         )}
@@ -217,7 +238,7 @@ export default function PolicyPage() {
 
         {rightPanelTab === "preview" && (
           <>
-            <p style={{ ...subtleStyle, marginTop: 8 }}>STEP3 저장(완료 조건 충족) 시 STEP4 기술 스펙 탭이 열립니다.</p>
+            <p style={{ ...subtleStyle, marginTop: 8 }}>GUIDED 모드에서는 STEP1 확정 후 STEP2/3/4 탭에 접근할 수 있습니다.</p>
             {!locked && missing.length > 0 && (
               <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
                 <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>누락 항목</div>
@@ -270,40 +291,6 @@ export default function PolicyPage() {
   );
 }
 
-function Step3FieldRow({
-  label,
-  value,
-  reviewed,
-  disabled,
-  onChange,
-  onToggle,
-}: {
-  label: string;
-  value: string;
-  reviewed: boolean;
-  disabled: boolean;
-  onChange: (value: string) => void;
-  onToggle: () => void;
-}) {
-  return (
-    <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#fcfcfd" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>{label}</div>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#6b7280" }}>
-          <input type="checkbox" checked={reviewed} onChange={onToggle} disabled={disabled} />
-          검토 완료
-        </label>
-      </div>
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        style={{ ...inputStyle, minHeight: 70, width: "100%", marginTop: 8 }}
-      />
-    </div>
-  );
-}
-
 const panelStyle: CSSProperties = {
   border: "1px solid #e5e7eb",
   borderRadius: 12,
@@ -345,6 +332,79 @@ const inputStyle: CSSProperties = {
   borderRadius: 8,
   padding: "8px 10px",
   fontSize: 14,
+};
+
+const sheetWrapStyle: CSSProperties = {
+  marginTop: 12,
+  border: "1px solid #cbd5e1",
+  borderRadius: 10,
+  overflow: "hidden",
+  background: "#fff",
+};
+
+const sheetHeaderRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "260px minmax(0, 1fr) 180px",
+  background: "#f3f4f6",
+  borderBottom: "1px solid #bfc9d9",
+  fontSize: 12,
+  fontWeight: 700,
+  color: "#374151",
+};
+
+const sheetHeadFieldStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRight: "1px solid #e5e7eb",
+};
+
+const sheetHeadValueStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRight: "1px solid #e5e7eb",
+};
+
+const sheetHeadNoteStyle: CSSProperties = {
+  padding: "10px 12px",
+};
+
+const sheetDataRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "260px minmax(0, 1fr) 180px",
+  borderBottom: "1px solid #eef2f7",
+  minHeight: 92,
+};
+
+const sheetFieldCellStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRight: "1px solid #e5e7eb",
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#374151",
+  display: "flex",
+  alignItems: "center",
+};
+
+const sheetValueCellStyle: CSSProperties = {
+  borderRight: "1px solid #e5e7eb",
+};
+
+const sheetValueInputStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 92,
+  border: "none",
+  outline: "none",
+  resize: "vertical",
+  padding: "10px 12px",
+  fontSize: 14,
+  color: "#1f2937",
+  background: "transparent",
+  lineHeight: 1.45,
+  fontFamily: "inherit",
+};
+
+const sheetNoteCellStyle: CSSProperties = {
+  padding: "10px 12px",
+  display: "flex",
+  alignItems: "flex-start",
 };
 
 const buttonStyle: CSSProperties = {

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   addHistoryEvent,
   canFreezeStep1,
@@ -26,6 +26,7 @@ import {
   type Step1Reversibility,
   type Step1Target,
 } from "@/lib/prismMvp";
+import Step1PreviewPanel, { type Step1PreviewAreaKey } from "../_components/Step1PreviewPanel";
 
 const TARGET_OPTIONS: Array<{ value: Step1Target; label: string }> = [
   { value: "internal_staff", label: "내부 실무자" },
@@ -110,7 +111,6 @@ const HITL_LABEL: Record<Step1Hitl, string> = {
 
 type InputMode = "form" | "table";
 type RightPanelTab = "preview" | "impact";
-type PreviewAreaKey = "strategy" | "policy" | "automation" | "state_flow" | "risk_profile";
 type Step1TableRowId =
   | "why"
   | "target"
@@ -135,6 +135,7 @@ type Step1TableRow = {
 type SheetColIndex = 0 | 1 | 2;
 type SheetCell = { row: number; col: SheetColIndex };
 type Step1TableNotes = Partial<Record<Step1TableRowId, string>>;
+const GUIDED_TEST_MODE = true;
 
 const DEFAULT_STEP1_ROW_ORDER: Step1TableRowId[] = [
   "why",
@@ -150,45 +151,12 @@ const DEFAULT_STEP1_ROW_ORDER: Step1TableRowId[] = [
   "kpi",
 ];
 
-const PREVIEW_AREA_META: Record<
-  PreviewAreaKey,
-  { label: string; bg: string; fg: string; border: string; rowIds: Step1TableRowId[] }
-> = {
-  strategy: {
-    label: "기획 의도",
-    bg: "#e0f2fe",
-    fg: "#075985",
-    border: "#7dd3fc",
-    rowIds: ["why", "target", "result_state", "kpi"],
-  },
-  policy: {
-    label: "통제 포인트",
-    bg: "#dcfce7",
-    fg: "#166534",
-    border: "#86efac",
-    rowIds: ["exposure", "reversibility", "impact", "hitl"],
-  },
-  automation: {
-    label: "실행 방식",
-    bg: "#f3e8ff",
-    fg: "#6b21a8",
-    border: "#d8b4fe",
-    rowIds: ["ai_task_types", "result_state", "exposure", "impact", "hitl"],
-  },
-  state_flow: {
-    label: "상태 모델",
-    bg: "#fef3c7",
-    fg: "#92400e",
-    border: "#fcd34d",
-    rowIds: ["result_state", "hitl"],
-  },
-  risk_profile: {
-    label: "리스크 영향",
-    bg: "#fee2e2",
-    fg: "#991b1b",
-    border: "#fca5a5",
-    rowIds: ["exposure", "reversibility", "impact", "hitl"],
-  },
+const PREVIEW_AREA_ROW_IDS: Record<Step1PreviewAreaKey, Step1TableRowId[]> = {
+  strategy: ["why", "target", "result_state", "kpi"],
+  policy: ["exposure", "reversibility", "impact", "hitl"],
+  automation: ["ai_task_types", "result_state", "exposure", "impact", "hitl"],
+  state_flow: ["result_state", "hitl"],
+  risk_profile: ["exposure", "reversibility", "impact", "hitl"],
 };
 
 function getSingleSelectOptionsByRowId(rowId: Step1TableRowId) {
@@ -332,6 +300,7 @@ function getNotePlaceholderByRowId(rowId: Step1TableRowId): string {
 
 export default function ScreeningPage() {
   const params = useParams();
+  const router = useRouter();
   const id = String(params?.id ?? "");
 
   const [data, setData] = useState<Step1Data>(getDefaultStep1());
@@ -339,7 +308,7 @@ export default function ScreeningPage() {
   const [message, setMessage] = useState("");
   const [inputMode, setInputMode] = useState<InputMode>("table");
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("preview");
-  const [activePreviewArea, setActivePreviewArea] = useState<PreviewAreaKey | null>(null);
+  const [activePreviewArea, setActivePreviewArea] = useState<Step1PreviewAreaKey | null>(null);
   const [rowOrder, setRowOrder] = useState<Step1TableRowId[]>(DEFAULT_STEP1_ROW_ORDER);
   const [dragRowId, setDragRowId] = useState<Step1TableRowId | null>(null);
   const [dropRowId, setDropRowId] = useState<Step1TableRowId | null>(null);
@@ -523,7 +492,7 @@ export default function ScreeningPage() {
       .map((row) => ({ ...row, note: tableNotes[row.id] ?? row.note }));
   }, [data, rowOrder, tableNotes]);
   const highlightedRowIds = useMemo(
-    () => new Set<Step1TableRowId>(activePreviewArea ? PREVIEW_AREA_META[activePreviewArea].rowIds : []),
+    () => new Set<Step1TableRowId>(activePreviewArea ? PREVIEW_AREA_ROW_IDS[activePreviewArea] : []),
     [activePreviewArea]
   );
   const isDirty = useMemo(() => {
@@ -1006,13 +975,18 @@ export default function ScreeningPage() {
 
   function handleFreeze() {
     if (!id) return;
-    if (!freezeReady) {
+    if (!freezeReady && !GUIDED_TEST_MODE) {
       setMessage(`확정 불가: 필수 항목 ${missingForFreeze.length}개를 채워주세요.`);
       return;
     }
     setStep1Data(id, data);
     setStep2Data(id, generateStep2Data(data));
-    setProgress(id, { step1Frozen: true });
+    setProgress(id, { step1Frozen: true, step2Completed: false, step3Completed: false });
+    addHistoryEvent(id, {
+      stage: "step2",
+      action: HISTORY_EVENT_TYPES.REGENERATE_STEP2_FROM_STEP1,
+      detail: "STEP1 확정으로 STEP2 초안 재생성(기존 STEP2 덮어쓰기)",
+    });
     addHistoryEvent(id, {
       stage: "step1",
       action: HISTORY_EVENT_TYPES.FREEZE_STEP1,
@@ -1022,13 +996,22 @@ export default function ScreeningPage() {
     setSavedNotesSnapshot(tableNotes);
     setSavedRowOrderSnapshot(rowOrder);
     setFrozen(true);
+    if (!freezeReady && GUIDED_TEST_MODE) {
+      setMessage(
+        `GUIDED 테스트 모드로 확정되었습니다. (${missingForFreeze.length}개 미입력) STEP2 초안은 현재 입력 기준으로 재생성되었습니다.`
+      );
+      router.push(`/project/${id}/execution`);
+      return;
+    }
     setMessage(frozen ? "STEP1 재확정 완료 (변경 반영)" : "STEP1 확정 완료 (다음 단계 열림)");
+    router.push(`/project/${id}/execution`);
   }
 
   return (
     <div ref={twoPaneRef} className="two-pane" style={twoPaneStyle}>
       <section style={mainPanelStyle}>
         <p style={subtleStyle}>전략 입력을 고정하고 운영 감당선(4축)을 선언하면 다음 단계가 열립니다.</p>
+        <p style={warningInlineStyle}>STEP1을 다시 확정하면 STEP2 초안은 재생성되어 기존 수정 내용이 덮어써질 수 있습니다.</p>
 
         <div style={headerRowStyle}>
           <div style={modeSwitchWrapStyle}>
@@ -1071,7 +1054,11 @@ export default function ScreeningPage() {
             >
               저장
             </button>
-            <button onClick={handleFreeze} disabled={!freezeReady || (frozen && !isDirty)} style={buttonStyle}>
+            <button
+              onClick={handleFreeze}
+              disabled={GUIDED_TEST_MODE ? false : !freezeReady || (frozen && !isDirty)}
+              style={buttonStyle}
+            >
               확정하기
             </button>
           </div>
@@ -1187,7 +1174,7 @@ export default function ScreeningPage() {
                   ...sheetDataRowStyle,
                   background: isDraggingThis ? "#f8fafc" : isRelated ? "#f8fbff" : "#fff",
                   boxShadow: isRelated ? "inset 3px 0 0 #60a5fa" : undefined,
-                  borderTop: dropBefore ? "2px solid #3b82f6" : rowIndex === 0 ? "none" : "1px solid #e5e7eb",
+                  borderTop: dropBefore ? "2px solid #3b82f6" : undefined,
                   borderBottom: dropAfter ? "2px solid #3b82f6" : sheetDataRowStyle.borderBottom,
                 }}
                 onDragOver={(e) => {
@@ -1493,69 +1480,7 @@ export default function ScreeningPage() {
         {rightPanelTab === "preview" && (
           <>
             <p style={{ ...subtleStyle, marginTop: 8 }}>입력값이 구조로 실시간 반영됩니다.</p>
-            <div style={previewFrameStyle}>
-              <PreviewSection
-                title="기획 의도"
-                badge={PREVIEW_AREA_META.strategy}
-                active={activePreviewArea === "strategy"}
-                onClick={() => setActivePreviewArea("strategy")}
-              >
-                <PreviewItem label="목적 (Purpose)" value={data.why.trim() || "미입력"} />
-                <PreviewItem label="대상 사용자 (Target)" value={targetSummary} />
-                <PreviewItem label="결과 상태 (Result State)" value={resultStateSummary} />
-                <PreviewItem label="성공 가설 (KPI Hypothesis)" value={kpiSummary} />
-              </PreviewSection>
-
-              <PreviewSection
-                title="실행 방식"
-                badge={PREVIEW_AREA_META.automation}
-                active={activePreviewArea === "automation"}
-                onClick={() => setActivePreviewArea("automation")}
-              >
-                <PreviewItem label="AI 역할 (AI Role)" value={aiRoleSummary} />
-                <PreviewItem label="사람 개입 시점 (Human Review Model)" value={humanReviewSummary} />
-                <PreviewItem label="게시/적용 방식 (Execution Authority)" value={executionAuthoritySummary} />
-                <PreviewItem label="자동 처리 허용 여부 (Conditional Delegation)" value={conditionalDelegationSummary} />
-              </PreviewSection>
-
-              <PreviewSection
-                title="처리 플로우"
-                badge={PREVIEW_AREA_META.state_flow}
-                active={activePreviewArea === "state_flow"}
-                onClick={() => setActivePreviewArea("state_flow")}
-              >
-                <div style={previewFlowStyle}>{stateFlow.map((node) => (node === stateFlow[0] ? node : `-> ${node}`)).join("\n")}</div>
-                {stateFlowWarning && <div style={{ ...subtleStyle, color: "#b45309" }}>{stateFlowWarning}</div>}
-              </PreviewSection>
-
-              <PreviewSection
-                title="통제 포인트"
-                badge={PREVIEW_AREA_META.policy}
-                active={activePreviewArea === "policy"}
-                onClick={() => setActivePreviewArea("policy")}
-              >
-                <PreviewItem label="노출 범위 (Exposure)" value={exposureSummary} />
-                <PreviewItem label="되돌림 가능성 (Reversibility)" value={reversibilitySummary} />
-                <PreviewItem label="실패 비용 위치 (Impact)" value={impactSummary} />
-                <PreviewItem label="인간 개입 시점 (HITL)" value={hitlSummary} />
-              </PreviewSection>
-
-              <PreviewSection
-                title="리스크 영향"
-                badge={PREVIEW_AREA_META.risk_profile}
-                active={activePreviewArea === "risk_profile"}
-                onClick={() => setActivePreviewArea("risk_profile")}
-                isLast
-              >
-                <PreviewItem label="기준 항목 (Primary Anchor)" value={impactAnchor} />
-                <div style={previewReasonStyle}>참고 신호 (Context Signals)</div>
-                <ul style={previewReasonListStyle}>
-                  {riskSignals.map((signal) => (
-                    <li key={signal}>- {signal}</li>
-                  ))}
-                </ul>
-              </PreviewSection>
-            </div>
+            <Step1PreviewPanel data={data} activeArea={activePreviewArea} onAreaClick={setActivePreviewArea} />
           </>
         )}
 
@@ -1699,6 +1624,16 @@ const subtleStyle: CSSProperties = {
   fontSize: 15,
 };
 
+const warningInlineStyle: CSSProperties = {
+  margin: "8px 0 0",
+  color: "#92400e",
+  background: "#fffbeb",
+  border: "1px solid #fde68a",
+  borderRadius: 8,
+  padding: "8px 10px",
+  fontSize: 13,
+};
+
 const modeSwitchWrapStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -1750,7 +1685,7 @@ const blockStyle: CSSProperties = {
 
 const sheetWrapStyle: CSSProperties = {
   marginTop: 14,
-  border: "1px solid #d1d5db",
+  border: "1px solid #cbd5e1",
   borderRadius: 10,
   overflow: "hidden",
   background: "#fff",
@@ -1761,7 +1696,7 @@ const sheetHeaderRowStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "260px minmax(0, 1fr) 200px",
   background: "#f3f4f6",
-  borderBottom: "1px solid #d1d5db",
+  borderBottom: "1px solid #bfc9d9",
   fontSize: 12,
   fontWeight: 700,
   color: "#374151",
@@ -1769,12 +1704,12 @@ const sheetHeaderRowStyle: CSSProperties = {
 
 const sheetHeadFieldStyle: CSSProperties = {
   padding: "10px 12px",
-  borderRight: "1px solid #d1d5db",
+  borderRight: "1px solid #e5e7eb",
 };
 
 const sheetHeadValueStyle: CSSProperties = {
   padding: "10px 12px",
-  borderRight: "1px solid #d1d5db",
+  borderRight: "1px solid #e5e7eb",
 };
 
 const sheetHeadNoteStyle: CSSProperties = {
@@ -1784,7 +1719,7 @@ const sheetHeadNoteStyle: CSSProperties = {
 const sheetDataRowStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "260px minmax(0, 1fr) 200px",
-  borderBottom: "1px solid #e5e7eb",
+  borderBottom: "1px solid #eef2f7",
 };
 
 const sheetFieldCellStyle: CSSProperties = {

@@ -6,9 +6,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import {
   addHistoryEvent,
-  canAccessExecution,
-  canAccessPolicy,
-  canAccessTechSpec,
   getHistory,
   getProgress,
   HISTORY_EVENT_TYPES,
@@ -55,17 +52,17 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
       {
         href: `/project/${id}/execution`,
         label: "STEP 2 설계 초안",
-        locked: !canAccessExecution(progress),
+        locked: !progress.step1Frozen,
       },
       {
         href: `/project/${id}/policy`,
         label: "STEP 3 자동화/리스크",
-        locked: !canAccessPolicy(progress),
+        locked: !progress.step1Frozen,
       },
       {
         href: `/project/${id}/tech-spec`,
         label: "STEP 4 기술 스펙",
-        locked: !canAccessTechSpec(progress),
+        locked: !progress.step1Frozen,
       },
     ],
     [id, progress]
