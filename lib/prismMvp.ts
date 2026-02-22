@@ -41,40 +41,22 @@ export type Step1Data = {
 };
 
 export type Step2Data = {
-  status_model: string;
   user_flow: string;
   ai_intervention: string;
   system_process: string;
   human_control: string;
-  failure_strategy: string;
-  delivery_mode: string;
-  data_storage: string;
-  log_fields: string;
-  cost_strategy: string;
   notes: Record<
-    | "status_model"
     | "user_flow"
     | "ai_intervention"
     | "system_process"
-    | "human_control"
-    | "failure_strategy"
-    | "delivery_mode"
-    | "data_storage"
-    | "log_fields"
-    | "cost_strategy",
+    | "human_control",
     string
   >;
   reviewed: Record<
-    | "status_model"
     | "user_flow"
     | "ai_intervention"
     | "system_process"
-    | "human_control"
-    | "failure_strategy"
-    | "delivery_mode"
-    | "data_storage"
-    | "log_fields"
-    | "cost_strategy",
+    | "human_control",
     boolean
   >;
 };
@@ -93,33 +75,13 @@ export type Step4RowId =
   | "api_definition"
   | "input_schema"
   | "output_schema"
-  | "state_model"
-  | "state_transition_rules"
-  | "model_conditions"
-  | "fallback_conditions"
-  | "guardrail_policy"
-  | "storage_structure"
-  | "log_structure"
-  | "monitoring_items"
-  | "rollback_policy"
-  | "security_pii_policy"
-  | "execution_structure";
+  | "state_model";
 
 export const TECH_SPEC_ROW_DEFS: Array<Pick<Step4Row, "rowId" | "title" | "relatedTabs">> = [
   { rowId: "api_definition", title: "API 정의", relatedTabs: ["sequence", "auth", "pipeline"] },
   { rowId: "input_schema", title: "입력 스키마", relatedTabs: ["dataflow", "sequence"] },
   { rowId: "output_schema", title: "출력 스키마", relatedTabs: ["dataflow", "sequence"] },
   { rowId: "state_model", title: "상태 모델", relatedTabs: ["state", "pipeline", "rollback"] },
-  { rowId: "state_transition_rules", title: "상태 전이 규칙", relatedTabs: ["state", "error_retry", "pipeline"] },
-  { rowId: "model_conditions", title: "모델 조건", relatedTabs: ["cost", "pipeline", "dataflow"] },
-  { rowId: "fallback_conditions", title: "Fallback 조건", relatedTabs: ["error_retry", "pipeline"] },
-  { rowId: "guardrail_policy", title: "Guardrail 정책", relatedTabs: ["error_retry", "dataflow", "auth"] },
-  { rowId: "storage_structure", title: "저장 구조", relatedTabs: ["dataflow", "observability", "rollback"] },
-  { rowId: "log_structure", title: "로그 구조", relatedTabs: ["observability", "dataflow"] },
-  { rowId: "monitoring_items", title: "모니터링 항목", relatedTabs: ["observability", "rollback", "cost"] },
-  { rowId: "rollback_policy", title: "롤백 정책", relatedTabs: ["rollback", "observability"] },
-  { rowId: "security_pii_policy", title: "보안/PII 정책", relatedTabs: ["auth", "dataflow"] },
-  { rowId: "execution_structure", title: "실행 구조", relatedTabs: ["pipeline", "sequence", "state"] },
 ];
 
 type Step3FieldKey =
@@ -197,28 +159,12 @@ const STEP4_ROW_IDS = [
   "input_schema",
   "output_schema",
   "state_model",
-  "state_transition_rules",
-  "model_conditions",
-  "fallback_conditions",
-  "guardrail_policy",
-  "storage_structure",
-  "log_structure",
-  "monitoring_items",
-  "rollback_policy",
-  "security_pii_policy",
-  "execution_structure",
 ] as const;
 const STEP2_REVIEW_KEYS = [
-  "status_model",
   "user_flow",
   "ai_intervention",
   "system_process",
   "human_control",
-  "failure_strategy",
-  "delivery_mode",
-  "data_storage",
-  "log_fields",
-  "cost_strategy",
 ] as const;
 
 const STEP3_REVIEW_KEYS = [
@@ -267,39 +213,21 @@ const step1Schema = z.object({
 });
 
 const step2Schema = z.object({
-  status_model: z.string(),
   user_flow: z.string(),
   ai_intervention: z.string(),
   system_process: z.string(),
   human_control: z.string(),
-  failure_strategy: z.string(),
-  delivery_mode: z.string(),
-  data_storage: z.string(),
-  log_fields: z.string(),
-  cost_strategy: z.string(),
   notes: z.object({
-    status_model: z.string(),
     user_flow: z.string(),
     ai_intervention: z.string(),
     system_process: z.string(),
     human_control: z.string(),
-    failure_strategy: z.string(),
-    delivery_mode: z.string(),
-    data_storage: z.string(),
-    log_fields: z.string(),
-    cost_strategy: z.string(),
   }),
   reviewed: z.object({
-    status_model: z.boolean(),
     user_flow: z.boolean(),
     ai_intervention: z.boolean(),
     system_process: z.boolean(),
     human_control: z.boolean(),
-    failure_strategy: z.boolean(),
-    delivery_mode: z.boolean(),
-    data_storage: z.boolean(),
-    log_fields: z.boolean(),
-    cost_strategy: z.boolean(),
   }),
 });
 
@@ -522,17 +450,7 @@ function asStep4RowId(value: unknown): Step4RowId | undefined {
   return value === "api_definition" ||
     value === "input_schema" ||
     value === "output_schema" ||
-    value === "state_model" ||
-    value === "state_transition_rules" ||
-    value === "model_conditions" ||
-    value === "fallback_conditions" ||
-    value === "guardrail_policy" ||
-    value === "storage_structure" ||
-    value === "log_structure" ||
-    value === "monitoring_items" ||
-    value === "rollback_policy" ||
-    value === "security_pii_policy" ||
-    value === "execution_structure"
+    value === "state_model"
     ? value
     : undefined;
 }
@@ -690,16 +608,10 @@ function parseStep2(value: unknown): Partial<Step2Data> {
   ) as Step2Data["reviewed"];
 
   return {
-    status_model: asString(value.status_model),
     user_flow: asString(value.user_flow),
     ai_intervention: asString(value.ai_intervention),
     system_process: asString(value.system_process),
     human_control: asString(value.human_control),
-    failure_strategy: asString(value.failure_strategy),
-    delivery_mode: asString(value.delivery_mode),
-    data_storage: asString(value.data_storage),
-    log_fields: asString(value.log_fields),
-    cost_strategy: asString(value.cost_strategy),
     notes,
     reviewed,
   };
@@ -800,39 +712,21 @@ export function getDefaultStep1(): Step1Data {
 
 export function getDefaultStep2(): Step2Data {
   return {
-    status_model: "",
     user_flow: "",
     ai_intervention: "",
     system_process: "",
     human_control: "",
-    failure_strategy: "",
-    delivery_mode: "",
-    data_storage: "",
-    log_fields: "",
-    cost_strategy: "",
     notes: {
-      status_model: "",
       user_flow: "",
       ai_intervention: "",
       system_process: "",
       human_control: "",
-      failure_strategy: "",
-      delivery_mode: "",
-      data_storage: "",
-      log_fields: "",
-      cost_strategy: "",
     },
     reviewed: {
-      status_model: false,
       user_flow: false,
       ai_intervention: false,
       system_process: false,
       human_control: false,
-      failure_strategy: false,
-      delivery_mode: false,
-      data_storage: false,
-      log_fields: false,
-      cost_strategy: false,
     },
   };
 }
@@ -1059,32 +953,13 @@ export function generateStep2Data(step1: Step1Data): Step2Data {
   const hasApprovalAssist = taskSet.has("approval_assist");
 
   const requiresPreReview = step1.hitl === "pre_review" || step1.result_state === "review_requested";
-  const canAutoPublish = step1.result_state === "published_or_executed" && step1.exposure !== "public" && step1.impact !== "high" && step1.hitl !== "pre_review";
 
-  const statusParts: string[] = ["input", "generating"];
-  if (hasDraftGeneration) statusParts.push("draft");
-  if (requiresPreReview) statusParts.push("review_required");
-  if (step1.result_state === "review_requested") {
-    statusParts.push("approved");
-  }
-  if (step1.result_state) {
-    statusParts.push(step1.result_state);
-  } else if (hasDraftGeneration) {
-    statusParts.push("draft_saved");
-  }
-  const statusModel = `${statusParts.join(" -> ")} (failed/rejected 별도 권장)`;
-
-  const aiInterventions: string[] = [];
-  if (hasDraftGeneration) aiInterventions.push("draft_generation: 입력 완료 시 초안 생성");
-  if (hasCandidateSuggestion) aiInterventions.push("candidate_suggestion: 후보 제시 버튼 트리거");
-  if (hasRevisionSuggestion) aiInterventions.push("revision_suggestion: 개선 제안 버튼 트리거");
-  if (hasPolicyCheck) aiInterventions.push("policy_check: 정책 점검 실행 트리거");
-  if (hasClassification) aiInterventions.push("classification: 입력 분류 자동 처리");
-  if (hasApprovalAssist) aiInterventions.push("approval_assist: 승인 단계 보조");
   const aiIntervention =
-    aiInterventions.length > 0
-      ? aiInterventions.join(" / ")
-      : "ai_task_types 미선택: 사용자 트리거 기반 수동 실행";
+    step1.final_executor === "automatic"
+      ? "자동 실행 (Automatic Execution)"
+      : hasPolicyCheck || hasClassification
+        ? "조건부 실행 (Conditional Execution)"
+        : "버튼 실행 (Button Triggered)";
 
   const flowSteps: string[] = ["프로젝트 생성", "입력 작성"];
   if (hasDraftGeneration) flowSteps.push("초안 생성");
@@ -1104,64 +979,40 @@ export function generateStep2Data(step1: Step1Data): Step2Data {
       : step1.exposure === "limited_external"
         ? "제한적 외부 노출은 정책 기준 충족 시 승인"
         : "내부 참고용은 내부 정책 기준으로 처리";
-  const monitoringLevel =
-    step1.impact === "high"
-      ? "오류율/승인 반려율/정책 위반율을 강화 모니터링"
-      : step1.impact === "medium"
-        ? "오류율/응답시간/사용자 수정률 기본 모니터링"
-        : "오류율/응답시간 경량 모니터링";
-
-  const hitlPolicy =
+  const humanControl =
     step1.hitl === "pre_review"
-      ? "사전 리뷰(pre_review) 후 적용"
+      ? "승인 필수 (Review Required)"
       : step1.hitl === "post_monitoring"
-        ? "적용 후 모니터링(post_monitoring) 기반 운영"
-        : "인간 개입 없음(none), 서버 정책 게이트로만 통제";
-
-  const failureSuffix =
-    step1.impact === "high" || step1.exposure === "public"
-      ? " / 고위험·외부노출: 자동 중단 + 운영 알림 + 사용자 노출 제한"
-      : step1.reversibility === "irreversible"
-        ? " / 되돌림 어려움: 승인 전 검증 강화 + 수동 승인 우선"
-        : "";
+        ? "조건부 승인 (Conditional Review)"
+        : "승인 없음 (No Review)";
 
   return {
     ...getDefaultStep2(),
-    status_model: statusModel,
     user_flow: flowSteps.join(" -> "),
     ai_intervention: aiIntervention,
     system_process: `입력값 검증 -> AI 호출/트리거 실행 -> 결과 저장 -> 상태 반영 (실패 시 failed), 정책: ${exposurePolicy}`,
-    human_control: `${hitlPolicy} (AI 최소 역할: ${step1.ai_min_role || "draft_only"})`,
-    failure_strategy: `AI 실패 시 1회 재시도 -> 실패 시 알림 및 수동 모드 전환 (idempotent 처리)${failureSuffix}`,
-    delivery_mode: "화면에 초안 + 상태 배지(draft) 노출, 저장 완료 후 노출",
-    data_storage: "post_drafts 저장 + confidence + version 필드",
-    log_fields: "input/output/model_version/call_time/latency/error_code",
-    cost_strategy: `${canAutoPublish ? "자동 게시 조건부 허용" : "자동 게시 비활성"} / ${monitoringLevel}`,
+    human_control: humanControl,
   };
 }
 
 export function step2ToText(step2: Step2Data): string {
+  const baseStateModel = step2.system_process || "input -> generating -> draft -> review_required -> draft_saved";
+  const monitoringDefault = "오류율, p95 응답시간, 사용자 수정률, 호출당 비용";
   return [
     "[STEP2 설계 초안]",
-    `- 기본 상태 모델: ${step2.status_model || "미정"}`,
     `- 사용자 행동 흐름: ${step2.user_flow || "미정"}`,
     `- AI 개입 위치: ${step2.ai_intervention || "미정"}`,
     `- 시스템 처리 구조: ${step2.system_process || "미정"}`,
     `- Human control: ${step2.human_control || "미정"}`,
-    `- 실패 대응: ${step2.failure_strategy || "미정"}`,
-    `- 결과 전달 방식: ${step2.delivery_mode || "미정"}`,
-    `- 데이터 저장 구조: ${step2.data_storage || "미정"}`,
-    `- 기본 로그 항목: ${step2.log_fields || "미정"}`,
-    `- 비용 전략: ${step2.cost_strategy || "미정"}`,
     "",
     "[상태 모델]",
-    step2.status_model || "미정",
+    baseStateModel,
     "",
     "[AI 개입 위치]",
     step2.ai_intervention || "미정",
     "",
     "[자동 생성 레이어 - 기본 상태 모델]",
-    "input -> generating -> draft -> review -> published",
+    baseStateModel,
     "",
     "[자동 생성 레이어 - 기본 실패 전략]",
     "- model_error 발생 시 1회 재시도",
@@ -1180,7 +1031,7 @@ export function step2ToText(step2: Step2Data): string {
     "- 지수 백오프 1회 재시도",
     "",
     "[자동 생성 레이어 - 기본 모니터링 지표]",
-    "- 오류율, p95 응답시간, 사용자 수정률, 호출당 비용",
+    `- ${monitoringDefault}`,
     "",
     "[자동 생성 레이어 - 기본 캐시 전략]",
     "- 입력 hash 기준 단기 캐시, 정책 변경 시 무효화",
@@ -1189,16 +1040,10 @@ export function step2ToText(step2: Step2Data): string {
 
 export function getStep2MissingFields(step2: Step2Data): string[] {
   const required: Array<{ key: keyof Step2Data; label: string }> = [
-    { key: "status_model", label: "기본 상태 모델" },
-    { key: "user_flow", label: "사용자 행동 흐름" },
-    { key: "ai_intervention", label: "AI 개입 위치" },
-    { key: "system_process", label: "시스템 처리 구조" },
-    { key: "human_control", label: "Human control 기본값" },
-    { key: "failure_strategy", label: "실패 대응 기본 구조" },
-    { key: "delivery_mode", label: "결과 전달 방식" },
-    { key: "data_storage", label: "데이터 저장 구조" },
-    { key: "log_fields", label: "기본 로그 항목" },
-    { key: "cost_strategy", label: "비용 전략 기본값" },
+    { key: "user_flow", label: "사용자 여정" },
+    { key: "ai_intervention", label: "AI 실행 위치" },
+    { key: "human_control", label: "AI 실행 결과 처리" },
+    { key: "system_process", label: "서버 상태 전이" },
   ];
   return required
     .filter((f) => {
@@ -1228,24 +1073,15 @@ export function generateStep3Policy(step1: Step1Data, step2: Step2Data): Step3Po
     data_assetization_strategy: "사용자 수정 로그만 저장, 자동 학습은 미적용",
     monitoring_standard: "오류율/응답시간/사용자 수정률 추적 (오류율 3% 이하 유지 목표)",
     rollback_standard: "오류율 5% 초과 시 이전 모델로 롤백 (모델 단위)",
-    model_versioning: `모델 버전 및 호출 로그 필수 저장 (대상 사용자: ${step1.target.join(", ") || "미정"}, 상태 모델: ${step2.status_model || "미정"})`,
+    model_versioning: `모델 버전 및 호출 로그 필수 저장 (대상 사용자: ${step1.target.join(", ") || "미정"}, 처리 흐름: ${step2.system_process || "미정"})`,
   };
 }
 
 export function getStep3MissingFields(step3: Step3Policy): string[] {
   const required: Array<{ key: Step3FieldKey; label: string }> = [
-    { key: "automation_level_adjustment", label: "자동화 수준 조정" },
-    { key: "auto_processing_scope", label: "자동 처리 범위 조정" },
-    { key: "tolerance_adjustment", label: "허용 오차 조정" },
-    { key: "human_review_insertion", label: "Human review 삽입 여부" },
-    { key: "failure_ux_policy", label: "실패 시 UX 정책" },
-    { key: "final_decision_policy", label: "AI 판단 최종 여부" },
-    { key: "cost_quality_strategy", label: "비용-품질 균형 전략" },
-    { key: "cache_strategy", label: "캐시 전략" },
-    { key: "data_assetization_strategy", label: "데이터 자산화 전략" },
-    { key: "monitoring_standard", label: "모니터링 기준" },
-    { key: "rollback_standard", label: "롤백 기준" },
-    { key: "model_versioning", label: "모델 버전 관리" },
+    { key: "automation_level_adjustment", label: "자동 실행 수준" },
+    { key: "auto_processing_scope", label: "자동 승인 기준" },
+    { key: "data_assetization_strategy", label: "결과 데이터 활용 방식" },
   ];
   return required
     .filter((f) => !String(step3[f.key] ?? "").trim())
@@ -1254,8 +1090,7 @@ export function getStep3MissingFields(step3: Step3Policy): string[] {
 
 export function canCompleteStep3(step3: Step3Policy): boolean {
   const missing = getStep3MissingFields(step3);
-  const allReviewed = Object.values(step3.reviewed).every(Boolean);
-  return missing.length === 0 && allReviewed;
+  return missing.length === 0;
 }
 
 export function generateTechSpec(step1: Step1Data, step2Draft: string, step3: Step3Policy): string {
@@ -1302,14 +1137,8 @@ export function generateTechSpec(step1: Step1Data, step2Draft: string, step3: St
 
 export function generateTechSpecRows(step1: Step1Data, step2: Step2Data, step3: Step3Policy): Step4Row[] {
   void step1;
-  const stateModel = step2.status_model || "input -> generating -> draft -> user_edit -> review_requested -> published";
-  const autoScope = step3.auto_processing_scope || "confidence 0.8 이상만 auto_approved";
-  const fallback = step3.failure_ux_policy || "1회 자동 재시도 -> 실패 시 failed";
-  const modelCond = step3.cost_quality_strategy || "기본 모델 사용, 조건부 상위 모델 호출";
-  const guardrail = step3.tolerance_adjustment || "confidence < 0.7 경고 + 정책 필터";
-  const monitor = step3.monitoring_standard || "오류율/응답시간/사용자 수정률 추적";
-  const rollback = step3.rollback_standard || "오류율 5% 초과 시 이전 모델로 롤백";
-  const pii = step3.data_assetization_strategy || "PII 마스킹 저장, 원문 로그 미저장";
+  const stateModel = step2.system_process || "input -> generating -> draft -> user_edit -> review_requested -> published";
+  void step3;
   const contentById: Record<Step4RowId, Pick<Step4Row, "spec" | "note">> = {
     api_definition: {
       spec: "POST /posts\nPOST /posts/{id}/generate\nPATCH /posts/{id}\nPOST /posts/{id}/publish-request\nPOST /posts/{id}/approve",
@@ -1326,46 +1155,6 @@ export function generateTechSpecRows(step1: Step1Data, step2: Step2Data, step3: 
     state_model: {
       spec: stateModel,
       note: "DB enum 고정 필요, failed/rejected 상태 추가 권장",
-    },
-    state_transition_rules: {
-      spec: `${autoScope}\npublish 승인 = 외부 반영 승인 (휴먼 필수)`,
-      note: "auto_approved는 초안 내부 저장 승인(배포 아님), 상태 변경은 서버 전용",
-    },
-    model_conditions: {
-      spec: modelCond,
-      note: "토큰 기준 환산 필요, 요금제/민감 카테고리 분기 가능",
-    },
-    fallback_conditions: {
-      spec: fallback,
-      note: "429/5xx 분리 처리, 지수 백오프 권장",
-    },
-    guardrail_policy: {
-      spec: guardrail,
-      note: "금칙어 + 정책 필터 병행 권장, 카테고리별 분리 가능",
-    },
-    storage_structure: {
-      spec: "posts(id, user_id, status, created_at)\npost_drafts(post_id, version, draft_json, confidence, model, model_version)",
-      note: "version 필수, 입력 스냅샷 저장 권장",
-    },
-    log_structure: {
-      spec: "logs(input, output, model_version, latency, error_code)",
-      note: "PII 마스킹 필수, 샘플링 저장 여부 결정",
-    },
-    monitoring_items: {
-      spec: monitor,
-      note: "임계값 정의 필요 (예: 오류율 3%)",
-    },
-    rollback_policy: {
-      spec: rollback,
-      note: "모델/프롬프트 버전 분리 관리 필요",
-    },
-    security_pii_policy: {
-      spec: pii,
-      note: "PII 범위 명확화 필요",
-    },
-    execution_structure: {
-      spec: "초안 생성 동기 처리\n게시 승인 비동기 처리",
-      note: "동기 타임아웃 UX 필요, 비동기 큐 재처리 전략 필요",
     },
   };
 

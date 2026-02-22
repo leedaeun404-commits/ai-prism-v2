@@ -23,72 +23,56 @@ import {
 import Step1PreviewPanel, { type Step1PreviewAreaKey } from "../_components/Step1PreviewPanel";
 
 type Step2FieldKey =
-  | "status_model"
   | "user_flow"
   | "ai_intervention"
   | "system_process"
-  | "human_control"
-  | "failure_strategy"
-  | "delivery_mode"
-  | "data_storage"
-  | "log_fields"
-  | "cost_strategy";
+  | "human_control";
+type Step2SelectFieldKey = "ai_intervention" | "human_control";
+type InputMode = "table" | "form";
 
 type RowOrderPosition = "before" | "after";
 type SheetColIndex = 0 | 1 | 2;
 type SheetCell = { row: number; col: SheetColIndex };
 
 const STEP2_FIELDS: Array<{ key: Step2FieldKey; label: string }> = [
-  { key: "user_flow", label: "사용자는 어떤 순서로 기능을 이용하나요" },
+  { key: "user_flow", label: "사용자는 어떤 순서로 기능 이용하나요" },
   { key: "ai_intervention", label: "그 순서 중에서, AI가 실행되는 순간은" },
   { key: "human_control", label: "AI 결과는 바로 확정되나요, 아니면 사람이 한 번 더 확인하나요" },
-  { key: "delivery_mode", label: "사용자는 결과를 이렇게 확인해요" },
-  { key: "status_model", label: "사용자가 끝났다고 느끼는 순간까지, 화면 몇 번 바꿀건지" },
   { key: "system_process", label: "버튼 누르면 서버 어떻게 처리할건지" },
-  { key: "failure_strategy", label: "AI 실패하면 처리는" },
-  { key: "data_storage", label: "기능 한 번 돌릴 때, DB에 뭐 남길까요" },
-  { key: "log_fields", label: "이슈 터지면, 우리가 뭘 보고 원인 찾을 건지" },
-  { key: "cost_strategy", label: "모델 사용이랑 비용은 어뜨케 할까요" },
 ];
 
 const STEP2_DEFAULT_ORDER: Step2FieldKey[] = STEP2_FIELDS.map((f) => f.key);
-const STEP2_LEGACY_DEFAULT_ORDER: Step2FieldKey[] = [
-  "user_flow",
-  "ai_intervention",
-  "human_control",
-  "status_model",
-  "system_process",
-  "failure_strategy",
-  "delivery_mode",
-  "data_storage",
-  "log_fields",
-  "cost_strategy",
-];
 
 const STEP2_HELPER_TEXT: Record<Step2FieldKey, string> = {
-  user_flow: "[사용자 흐름]\n사용자가 실제로 클릭하는 순서를 처음부터 끝까지 적어요.\n이 순서가 기준이 되고, 이후 AI 실행과 승인 위치가 여기에 올라가요.",
-  ai_intervention: "[AI 개입 위치]\n위에서 적은 단계 중 하나에 AI 실행 지점을 표시해요.\n자동 실행인지, 버튼 실행인지 구분해요.\n이 위치가 모호하면 의도하지 않은 자동 동작이 생길 수 있어요.",
-  human_control: "[최종 승인/통제 지점]\nAI 실행 다음 단계에서 사람이 개입하는 위치를 적어요.\n승인이 필요한 지점이 있으면 책임&통제 범위가 정리돼요.",
-  delivery_mode: "[결과 노출 기준]\n결과가 언제, 어떤 상태에서 화면에 노출되는지 적어요.\n저장 완료 전 노출인지, 저장 후 노출인지 구분해요.",
-  status_model: "[상태 구조]\n이 기능이 시작에서 종료까지 어떤 상태를 거치는지 적어요.\n시작 상태와 종료 상태를 명확히 해야 저장·승인·실패 흐름이 충돌하지 않아요.",
+  user_flow:
+    "[사용자 흐름]\n사용자가 실제로 클릭하는 순서를 처음부터 끝까지 적어요.\n이 순서가 기준이 되고, 이후 AI 실행과 승인 위치가 여기에 올라가요.",
+  ai_intervention:
+    "[AI 개입 위치]\n위에서 적은 단계 중 하나에 AI 실행 지점을 표시해요.\n자동 실행인지, 버튼 실행인지 구분해요.\n이 위치가 모호하면 의도하지 않은 자동 동작이 생길 수 있어요.",
+  human_control:
+    "[최종 승인/통제 지점 정의]\nAI 실행 다음 단계에서 사람이 개입하는 위치를 적어요.\n승인이 필요한 지점이 있으면 책임&통제 범위가 정리돼요.",
   system_process:
-    "[처리 로직 순서]\n사용자 행동 뒤에서 어떤 순서로 처리되는지 적어요.\n검증 먼저 할 건지,\nAI 호출은 어디서 할 건지,\n저장은 언제 할 건지,\n상태 변경은 저장 전에 할 건지 후에 할 건지 정해요.\n이 순서 안 정하면 구현에서 해석이 갈릴 수 있어요",
-  failure_strategy:
-    "[예외/실패 처리 기준]\n재시도 몇 번?\n실패하면 화면은 어떻게 보여줄 건지?\n수동 전환 버튼 줄 건지?\n중복 저장 안 생기게 할 건지?\n\n이거 안 정하면 나중에 운영에서 케어 하면 돼요",
-  data_storage:
-    "[저장 구조]\n초안 원문 저장할지,\n수정 이력 버전으로 남길지,\nconfidence 저장할지,\n승인 상태도 같이 저장할건지\n이거 정하면 나중에 왜 이렇게 됐는지 추적 가능하긴 해요.",
-  log_fields:
-    "[로그/추적 기준]\n모델 버전 남길지,\n호출 시간, latency 남길지,\n에러 코드 남길지,\n요청 ID로 묶을 건지,\n로그 기준 없으면 장애 나면 감으로 대응 해야돼요.",
-  cost_strategy:
-    "[모델 호출 통제 기준]\n특정 조건에서 고급 모델 쓸건지\n호출 제한 둘건지\n자동 게시 막는 기준 잡을지\n토큰 길이 기준 분기할지\n기준 없이 호출 늘어나면, 나중에 비용 늘어날 수 있어요.",
+    "[처리 로직 흐름]\n사용자 행동 뒤에서 어떤 순서로 처리되는지 적어요.\n검증 먼저 할 건지\nAI 호출은 어디서 할 건지\n저장은 언제 할 건지\n상태 변경은 저장 전에 할 건지 후에 할 건지 정해요.\n\n이 순서 안 정하면 구현에서 해석이 갈릴 수 있어요.",
+};
+
+const STEP2_SELECT_OPTIONS: Record<Step2SelectFieldKey, string[]> = {
+  ai_intervention: [
+    "자동 실행 (Automatic Execution)",
+    "버튼 실행 (Button Triggered)",
+    "조건부 실행 (Conditional Execution)",
+  ],
+  human_control: [
+    "승인 필수 (Review Required)",
+    "조건부 승인 (Conditional Review)",
+    "승인 없음 (No Review)",
+  ],
 };
 
 const PREVIEW_TO_STEP2_FIELDS: Record<Step1PreviewAreaKey, Step2FieldKey[]> = {
-  strategy: ["user_flow", "delivery_mode", "data_storage"],
-  policy: ["system_process", "human_control", "failure_strategy"],
+  strategy: ["user_flow"],
+  policy: ["system_process", "human_control"],
   automation: ["ai_intervention", "human_control", "user_flow"],
-  state_flow: ["status_model", "user_flow"],
-  risk_profile: ["failure_strategy", "log_fields", "cost_strategy"],
+  state_flow: ["system_process", "user_flow"],
+  risk_profile: ["human_control", "system_process"],
 };
 
 export default function ExecutionPage() {
@@ -100,6 +84,7 @@ export default function ExecutionPage() {
   const [draft, setDraft] = useState<Step2Data | null>(null);
   const [step1, setStep1] = useState<Step1Data>(getDefaultStep1());
   const [message, setMessage] = useState("");
+  const [inputMode, setInputMode] = useState<InputMode>("table");
   const [rightPanelTab, setRightPanelTab] = useState<"preview" | "impact">("preview");
   const [activePreviewArea, setActivePreviewArea] = useState<Step1PreviewAreaKey | null>(null);
   const [rowOrder, setRowOrder] = useState<Step2FieldKey[]>(STEP2_DEFAULT_ORDER);
@@ -111,10 +96,12 @@ export default function ExecutionPage() {
   const [isSelecting, setIsSelecting] = useState(false);
   const [editingRowId, setEditingRowId] = useState<Step2FieldKey | null>(null);
   const [editingNoteRowId, setEditingNoteRowId] = useState<Step2FieldKey | null>(null);
+  const [openSelectRowId, setOpenSelectRowId] = useState<Step2SelectFieldKey | null>(null);
   const [rightPanelWidth, setRightPanelWidth] = useState(360);
   const [isResizing, setIsResizing] = useState(false);
   const twoPaneRef = useRef<HTMLDivElement | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
+  const activeSelectWrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -146,10 +133,7 @@ export default function ExecutionPage() {
             ...parsed.filter((k): k is Step2FieldKey => defaultOrder.includes(k)),
             ...defaultOrder.filter((k) => !parsed.includes(k)),
           ];
-          const isLegacyDefault =
-            normalized.length === STEP2_LEGACY_DEFAULT_ORDER.length &&
-            normalized.every((k, idx) => k === STEP2_LEGACY_DEFAULT_ORDER[idx]);
-          setRowOrder(isLegacyDefault ? STEP2_DEFAULT_ORDER : normalized);
+          setRowOrder(normalized);
         }
       }
     } catch {
@@ -194,6 +178,18 @@ export default function ExecutionPage() {
     window.addEventListener("mouseup", onUp);
     return () => window.removeEventListener("mouseup", onUp);
   }, [isSelecting]);
+
+  useEffect(() => {
+    if (!openSelectRowId) return;
+    function onPointerDown(e: MouseEvent) {
+      const target = e.target as Node | null;
+      if (activeSelectWrapRef.current && target && !activeSelectWrapRef.current.contains(target)) {
+        setOpenSelectRowId(null);
+      }
+    }
+    window.addEventListener("mousedown", onPointerDown);
+    return () => window.removeEventListener("mousedown", onPointerDown);
+  }, [openSelectRowId]);
 
   function handleSave() {
     if (!id || locked || !draft) return false;
@@ -289,6 +285,10 @@ export default function ExecutionPage() {
     );
   }
 
+  function isSelectField(key: Step2FieldKey): key is Step2SelectFieldKey {
+    return key === "ai_intervention" || key === "human_control";
+  }
+
   function moveRow(dragId: Step2FieldKey, targetId: Step2FieldKey, pos: RowOrderPosition) {
     setRowOrder((prev) => {
       const current = prev.length > 0 ? prev : STEP2_DEFAULT_ORDER;
@@ -326,7 +326,7 @@ export default function ExecutionPage() {
 
   function isEditableTarget(target: EventTarget | null) {
     if (!(target instanceof HTMLElement)) return false;
-    return Boolean(target.closest("textarea, input, select, option"));
+    return Boolean(target.closest("textarea, input, select, option, button, [data-editable='true']"));
   }
 
   function startCellSelection(row: number, col: SheetColIndex) {
@@ -472,9 +472,33 @@ export default function ExecutionPage() {
         <p style={subtleStyle}>
           동작 방식을 구체화해요.
           <br />
-          사용자 흐름, 상태 변경, 승인 지점, 실패 대응까지 정의된 1차 실행 설계 초안을 만들어요.
+          사용자 흐름, AI 실행 위치, 결과 처리, 서버 상태 전이를 정의해요.
         </p>
         <p style={warningInlineStyle}>STEP1을 다시 확정하면 STEP2 초안은 재생성되어 기존 수정 내용이 덮어써질 수 있습니다.</p>
+        <div style={modeSwitchWrapStyle}>
+          <div style={modeToggleStyle}>
+            <button
+              type="button"
+              onClick={() => setInputMode("table")}
+              style={{
+                ...modeToggleOptionStyle,
+                ...(inputMode === "table" ? modeToggleOptionActiveStyle : {}),
+              }}
+            >
+              표 모드
+            </button>
+            <button
+              type="button"
+              onClick={() => setInputMode("form")}
+              style={{
+                ...modeToggleOptionStyle,
+                ...(inputMode === "form" ? modeToggleOptionActiveStyle : {}),
+              }}
+            >
+              폼 모드
+            </button>
+          </div>
+        </div>
         <div style={topActionRowStyle}>
           <button onClick={handleSave} disabled={locked || !complete} style={buttonStyle}>
             저장
@@ -484,7 +508,7 @@ export default function ExecutionPage() {
           </button>
         </div>
 
-        {draft && (
+        {draft && inputMode === "table" && (
           <div
             ref={sheetRef}
             tabIndex={0}
@@ -578,7 +602,47 @@ export default function ExecutionPage() {
                     }}
                     onMouseEnter={() => extendCellSelection(rowIndex, 1)}
                   >
-                    {editingRowId === field.key && !locked ? (
+                    {!locked && isSelectField(field.key) ? (
+                      <div
+                        data-editable="true"
+                        ref={openSelectRowId === field.key ? activeSelectWrapRef : null}
+                        style={sheetSelectWrapStyle}
+                      >
+                        <button
+                          type="button"
+                          data-editable="true"
+                          onClick={() => setOpenSelectRowId((prev) => (prev === field.key ? null : field.key))}
+                          style={sheetSelectTriggerStyle}
+                        >
+                          <span>{draft[field.key] || "선택"}</span>
+                          <span style={sheetSelectChevronStyle}>{openSelectRowId === field.key ? "▴" : "▾"}</span>
+                        </button>
+                        {openSelectRowId === field.key && (
+                          <div data-editable="true" style={sheetSelectMenuStyle}>
+                            {STEP2_SELECT_OPTIONS[field.key].map((option) => {
+                              const selected = draft[field.key] === option;
+                              return (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  data-editable="true"
+                                  onClick={() => {
+                                    updateField(field.key, option);
+                                    setOpenSelectRowId(null);
+                                  }}
+                                  style={{
+                                    ...sheetSelectOptionStyle,
+                                    ...(selected ? sheetSelectOptionActiveStyle : {}),
+                                  }}
+                                >
+                                  {option}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ) : editingRowId === field.key && !locked ? (
                       <textarea
                         autoFocus
                         value={draft[field.key]}
@@ -638,9 +702,111 @@ export default function ExecutionPage() {
           </div>
         )}
 
+        {draft && inputMode === "form" && (
+          <div style={formSheetWrapStyle}>
+            <div style={formSheetHeaderRowStyle}>
+              <div style={formSheetHeadFieldStyle}>Field</div>
+              <div style={formSheetHeadValueStyle}>Value</div>
+              <div style={formSheetHeadNoteStyle}>Note</div>
+            </div>
+            {orderedFields.map((field) => (
+              <div
+                key={field.key}
+                style={{
+                  ...formSheetDataRowStyle,
+                  ...(dropRowId === field.key && dropPosition === "before" ? { borderTop: "2px solid #3b82f6" } : {}),
+                  ...(dropRowId === field.key && dropPosition === "after" ? { borderBottom: "2px solid #3b82f6" } : {}),
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                  const pos: RowOrderPosition = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                  setDropRowId(field.key);
+                  setDropPosition(pos);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (!dragRowId || !dropRowId) return;
+                  moveRow(dragRowId, dropRowId, dropPosition);
+                  setDropRowId(null);
+                  setDragRowId(null);
+                  setMessage("STEP2 행 순서가 변경되었습니다.");
+                }}
+                onDragLeave={() => setDropRowId(null)}
+              >
+                <div style={formSheetFieldCellStyle}>
+                  <button
+                    type="button"
+                    draggable
+                    style={rowDragHandleStyle}
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", field.key);
+                      setDragRowId(field.key);
+                    }}
+                    onDragEnd={() => {
+                      setDragRowId(null);
+                      setDropRowId(null);
+                    }}
+                    title="드래그해서 행 순서 변경"
+                  >
+                    ≡
+                  </button>
+                  <div>{field.label}</div>
+                </div>
+                <div style={formSheetValueCellStyle}>
+                  {!locked && isSelectField(field.key) ? (
+                    <div style={formChoiceListStyle}>
+                      {STEP2_SELECT_OPTIONS[field.key].map((option) => {
+                        const checked = draft[field.key] === option;
+                        return (
+                          <label key={option} style={formChoiceItemStyle}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => updateField(field.key, checked ? "" : option)}
+                              style={formChoiceCheckboxStyle}
+                            />
+                            <span>{option}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : !locked ? (
+                    <textarea
+                      value={draft[field.key]}
+                      onChange={(e) => updateField(field.key, e.target.value)}
+                      style={formTextAreaStyle}
+                      placeholder={STEP2_HELPER_TEXT[field.key]}
+                    />
+                  ) : (
+                    <div style={formReadonlyStyle}>
+                      {draft[field.key] || <span style={sheetValuePlaceholderStyle}>입력</span>}
+                    </div>
+                  )}
+                </div>
+                <div style={formSheetNoteCellStyle}>
+                  {!locked ? (
+                    <textarea
+                      value={draft.notes[field.key]}
+                      onChange={(e) => updateNote(field.key, e.target.value)}
+                      style={formNoteTextAreaStyle}
+                      placeholder={STEP2_HELPER_TEXT[field.key]}
+                    />
+                  ) : (
+                    <div style={formReadonlyStyle}>
+                      {draft.notes[field.key] || <span style={sheetNotePlaceholderStyle}>{STEP2_HELPER_TEXT[field.key]}</span>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {!locked && (
           <p style={{ ...subtleStyle, marginTop: 10 }}>
-            완료 조건: 필수 항목 10개 입력 ({complete ? "충족" : "미충족"})
+            완료 조건: 필수 항목 4개 입력 ({complete ? "충족" : "미충족"})
           </p>
         )}
 
@@ -777,6 +943,32 @@ const warningInlineStyle: CSSProperties = {
   fontSize: 13,
 };
 
+const modeSwitchWrapStyle: CSSProperties = {
+  marginTop: 10,
+};
+
+const modeToggleStyle: CSSProperties = {
+  display: "inline-flex",
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  overflow: "hidden",
+  background: "#fff",
+};
+
+const modeToggleOptionStyle: CSSProperties = {
+  border: "none",
+  background: "transparent",
+  padding: "8px 12px",
+  fontSize: 13,
+  cursor: "pointer",
+  color: "#374151",
+};
+
+const modeToggleOptionActiveStyle: CSSProperties = {
+  background: "#111827",
+  color: "#fff",
+};
+
 const sheetWrapStyle: CSSProperties = {
   marginTop: 14,
   border: "1px solid #cbd5e1",
@@ -846,6 +1038,65 @@ const sheetValueInputStyle: CSSProperties = {
   fontFamily: "inherit",
 };
 
+const sheetSelectWrapStyle: CSSProperties = {
+  position: "relative",
+  padding: "10px 12px",
+};
+
+const sheetSelectTriggerStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 44,
+  border: "1px solid #cbd5e1",
+  borderRadius: 12,
+  background: "#ffffff",
+  color: "#1f2937",
+  fontSize: 14,
+  padding: "10px 14px",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  cursor: "pointer",
+  textAlign: "left",
+};
+
+const sheetSelectChevronStyle: CSSProperties = {
+  color: "#94a3b8",
+  fontSize: 12,
+  lineHeight: 1,
+};
+
+const sheetSelectMenuStyle: CSSProperties = {
+  position: "absolute",
+  left: 12,
+  right: 12,
+  top: 56,
+  zIndex: 30,
+  border: "1px solid #cbd5e1",
+  borderRadius: 14,
+  background: "#fff",
+  boxShadow: "0 16px 30px rgba(15, 23, 42, 0.14)",
+  padding: 10,
+  display: "grid",
+  gap: 6,
+};
+
+const sheetSelectOptionStyle: CSSProperties = {
+  border: "none",
+  background: "transparent",
+  borderRadius: 10,
+  padding: "12px 14px",
+  textAlign: "left",
+  fontSize: 14,
+  color: "#1f2937",
+  cursor: "pointer",
+};
+
+const sheetSelectOptionActiveStyle: CSSProperties = {
+  background: "#dbeafe",
+  color: "#1d4ed8",
+  fontWeight: 700,
+};
+
 const sheetValueDisplayStyle: CSSProperties = {
   minHeight: 72,
   padding: "10px 12px",
@@ -892,6 +1143,123 @@ const sheetNoteDisplayStyle: CSSProperties = {
 
 const sheetNotePlaceholderStyle: CSSProperties = {
   color: "#9ca3af",
+  whiteSpace: "pre-wrap",
+};
+
+const formSheetWrapStyle: CSSProperties = {
+  marginTop: 14,
+  border: "1px solid #cbd5e1",
+  borderRadius: 10,
+  overflow: "hidden",
+  background: "#fff",
+};
+
+const formSheetHeaderRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "240px minmax(0, 1fr) 300px",
+  background: "#f3f4f6",
+  borderBottom: "1px solid #bfc9d9",
+  fontSize: 12,
+  fontWeight: 700,
+  color: "#374151",
+};
+
+const formSheetHeadFieldStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRight: "1px solid #e5e7eb",
+};
+
+const formSheetHeadValueStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRight: "1px solid #e5e7eb",
+};
+
+const formSheetHeadNoteStyle: CSSProperties = {
+  padding: "10px 12px",
+};
+
+const formSheetDataRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "240px minmax(0, 1fr) 300px",
+  borderBottom: "1px solid #eef2f7",
+  minHeight: 92,
+};
+
+const formSheetFieldCellStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRight: "1px solid #e5e7eb",
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#374151",
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+};
+
+const formSheetValueCellStyle: CSSProperties = {
+  borderRight: "1px solid #e5e7eb",
+  padding: "10px 12px",
+};
+
+const formSheetNoteCellStyle: CSSProperties = {
+  padding: "10px 12px",
+};
+
+const formTextAreaStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 72,
+  border: "none",
+  borderRadius: 0,
+  padding: "10px 12px",
+  fontSize: 13,
+  resize: "vertical",
+  outline: "none",
+  fontFamily: "inherit",
+  background: "transparent",
+};
+
+const formChoiceListStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const formChoiceItemStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 14,
+  color: "#1f2937",
+  minHeight: 24,
+  cursor: "pointer",
+};
+
+const formChoiceCheckboxStyle: CSSProperties = {
+  width: 16,
+  height: 16,
+};
+
+const formNoteTextAreaStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 72,
+  border: "none",
+  borderRadius: 0,
+  padding: "10px 12px",
+  fontSize: 13,
+  resize: "vertical",
+  outline: "none",
+  fontFamily: "inherit",
+  color: "#374151",
+  background: "transparent",
+};
+
+const formReadonlyStyle: CSSProperties = {
+  minHeight: 44,
+  border: "1px solid #e5e7eb",
+  borderRadius: 8,
+  padding: "10px 12px",
+  fontSize: 13,
+  color: "#111827",
+  background: "#f9fafb",
   whiteSpace: "pre-wrap",
 };
 

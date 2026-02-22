@@ -19,21 +19,44 @@ import {
 } from "@/lib/prismMvp";
 
 type Step3FieldKey = keyof Omit<Step3Policy, "reviewed">;
+type Step3CoreFieldKey = "automation_level_adjustment" | "auto_processing_scope" | "data_assetization_strategy";
+type InputMode = "table" | "form";
+type RowOrderPosition = "before" | "after";
 
-const STEP3_FIELDS: Array<{ key: Step3FieldKey; label: string }> = [
-  { key: "automation_level_adjustment", label: "자동화 수준 조정" },
-  { key: "auto_processing_scope", label: "자동 처리 범위 조정" },
-  { key: "tolerance_adjustment", label: "허용 오차 조정" },
-  { key: "human_review_insertion", label: "Human review 삽입 여부" },
-  { key: "failure_ux_policy", label: "실패 시 UX 정책" },
-  { key: "final_decision_policy", label: "AI 판단 최종 여부" },
-  { key: "cost_quality_strategy", label: "비용-품질 균형 전략" },
-  { key: "cache_strategy", label: "캐시 전략" },
-  { key: "data_assetization_strategy", label: "데이터 자산화 전략" },
-  { key: "monitoring_standard", label: "모니터링 기준" },
-  { key: "rollback_standard", label: "롤백 기준" },
-  { key: "model_versioning", label: "모델 버전 관리" },
+const STEP3_CORE_FIELDS: Array<{ key: Step3CoreFieldKey; label: string }> = [
+  { key: "automation_level_adjustment", label: "자동 실행은 어느 수준까지 할까요" },
+  { key: "auto_processing_scope", label: "자동 승인 기준은 무엇인가요" },
+  { key: "data_assetization_strategy", label: "결과 데이터를 어떻게 활용할까요" },
 ];
+const STEP3_DEFAULT_ORDER: Step3CoreFieldKey[] = STEP3_CORE_FIELDS.map((f) => f.key);
+
+const STEP3_SELECT_OPTIONS: Record<Step3CoreFieldKey, string[]> = {
+  automation_level_adjustment: [
+    "수동 (Manual)",
+    "트리거 실행 (Trigger-based)",
+    "조건부 자동 (Conditional Automation)",
+    "전면 자동 (Full Automation)",
+  ],
+  auto_processing_scope: [
+    "자동 승인 없음 (No Auto Approval)",
+    "조건부 자동 승인 (Conditional Approval)",
+    "전면 자동 승인 (Full Auto Approval)",
+  ],
+  data_assetization_strategy: [
+    "저장 안 함 (No Storage)",
+    "익명 저장 (Anonymous Storage)",
+    "학습 활용 (Training Usage)",
+  ],
+};
+
+const STEP3_HELPER_TEXT: Record<Step3CoreFieldKey, string> = {
+  automation_level_adjustment:
+    "[자동 실행 수준]\n수동/트리거/조건부 자동/전면 자동 중 운영 가능한 수준을 선택해요.\n고위험 시나리오는 수동 또는 조건부 자동을 권장해요.",
+  auto_processing_scope:
+    "[자동 승인 기준]\n자동 승인 없음/조건부 자동 승인/전면 자동 승인 중 선택해요.\n조건부 자동 승인이라면 기준값(confidence, safety 등)을 명시해요.",
+  data_assetization_strategy:
+    "[결과 데이터 활용]\n저장 안 함/익명 저장/학습 활용 중 선택해요.\n보존 기간, 삭제 정책, 학습 사용 조건을 추가로 적어주세요.",
+};
 
 export default function PolicyPage() {
   const params = useParams();
@@ -42,11 +65,19 @@ export default function PolicyPage() {
 
   const [locked, setLocked] = useState(true);
   const [policy, setPolicy] = useState<Step3Policy | null>(null);
+  const [inputMode, setInputMode] = useState<InputMode>("table");
+  const [storageNote, setStorageNote] = useState("");
   const [message, setMessage] = useState("");
+  const [rowOrder, setRowOrder] = useState<Step3CoreFieldKey[]>(STEP3_DEFAULT_ORDER);
+  const [dragRowId, setDragRowId] = useState<Step3CoreFieldKey | null>(null);
+  const [dropRowId, setDropRowId] = useState<Step3CoreFieldKey | null>(null);
+  const [dropPosition, setDropPosition] = useState<RowOrderPosition>("after");
+  const [openSelectRowId, setOpenSelectRowId] = useState<Step3CoreFieldKey | null>(null);
   const [rightPanelTab, setRightPanelTab] = useState<"preview" | "impact">("preview");
   const [rightPanelWidth, setRightPanelWidth] = useState(360);
   const [isResizing, setIsResizing] = useState(false);
   const twoPaneRef = useRef<HTMLDivElement | null>(null);
+  const activeSelectWrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -69,14 +100,50 @@ export default function PolicyPage() {
       reviewed: { ...generated.reviewed, ...(existing.reviewed ?? {}) },
     };
 
-    for (const field of STEP3_FIELDS) {
+    for (const field of STEP3_CORE_FIELDS) {
       const v = String(existing[field.key] ?? "").trim();
       if (!v) merged[field.key] = generated[field.key];
     }
 
     setPolicy(merged);
+    const storageValue = String(merged.data_assetization_strategy ?? "");
+    const storageMatch = STEP3_SELECT_OPTIONS.data_assetization_strategy.find((opt) => storageValue.startsWith(opt));
+    if (storageMatch) {
+      const note = storageValue.slice(storageMatch.length).replace(/^\s*[-:]\s*/, "").trim();
+      setStorageNote(note);
+    } else {
+      setStorageNote("");
+    }
     setStep3Policy(id, merged);
+    try {
+      const raw = localStorage.getItem(`prism:mvp:${id}:step3:row-order`);
+      if (!raw) {
+        setRowOrder(STEP3_DEFAULT_ORDER);
+      } else {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+          setRowOrder(STEP3_DEFAULT_ORDER);
+        } else {
+          const normalized = [
+            ...parsed.filter((k): k is Step3CoreFieldKey => STEP3_DEFAULT_ORDER.includes(k)),
+            ...STEP3_DEFAULT_ORDER.filter((k) => !parsed.includes(k)),
+          ];
+          setRowOrder(normalized);
+        }
+      }
+    } catch {
+      setRowOrder(STEP3_DEFAULT_ORDER);
+    }
   }, [id, router]);
+
+  useEffect(() => {
+    if (!id || rowOrder.length === 0) return;
+    try {
+      localStorage.setItem(`prism:mvp:${id}:step3:row-order`, JSON.stringify(rowOrder));
+    } catch {
+      // ignore localStorage errors
+    }
+  }, [id, rowOrder]);
 
   useEffect(() => {
     if (!isResizing) return;
@@ -98,26 +165,71 @@ export default function PolicyPage() {
     };
   }, [isResizing]);
 
+  useEffect(() => {
+    if (!openSelectRowId) return;
+    function onPointerDown(e: MouseEvent) {
+      const target = e.target as Node | null;
+      if (activeSelectWrapRef.current && target && !activeSelectWrapRef.current.contains(target)) {
+        setOpenSelectRowId(null);
+      }
+    }
+    window.addEventListener("mousedown", onPointerDown);
+    return () => window.removeEventListener("mousedown", onPointerDown);
+  }, [openSelectRowId]);
+
   function updateField(key: Step3FieldKey, value: string) {
     setPolicy((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
-  function toggleReviewed(key: keyof Step3Policy["reviewed"]) {
-    setPolicy((prev) =>
-      prev
-        ? {
-            ...prev,
-            reviewed: { ...prev.reviewed, [key]: !prev.reviewed[key] },
-          }
-        : prev
-    );
+  function updateCoreSelectField(key: Step3CoreFieldKey, value: string) {
+    if (key !== "data_assetization_strategy") {
+      updateField(key, value);
+      return;
+    }
+    const note = storageNote.trim();
+    updateField(key, note ? `${value} - ${note}` : value);
+  }
+
+  function updateStorageNote(next: string) {
+    setStorageNote(next);
+    setPolicy((prev) => {
+      if (!prev) return prev;
+      const selected = STEP3_SELECT_OPTIONS.data_assetization_strategy.find((opt) =>
+        String(prev.data_assetization_strategy ?? "").startsWith(opt)
+      );
+      if (!selected) return prev;
+      const value = next.trim() ? `${selected} - ${next.trim()}` : selected;
+      return { ...prev, data_assetization_strategy: value };
+    });
+  }
+
+  function getSelectedOption(key: Step3CoreFieldKey, value: string): string {
+    const options = STEP3_SELECT_OPTIONS[key];
+    return options.find((opt) => value.startsWith(opt)) ?? "";
+  }
+
+  function moveRow(dragId: Step3CoreFieldKey, targetId: Step3CoreFieldKey, pos: RowOrderPosition) {
+    setRowOrder((prev) => {
+      const current = prev.length > 0 ? prev : STEP3_DEFAULT_ORDER;
+      const next = [...current];
+      const from = next.indexOf(dragId);
+      const target = next.indexOf(targetId);
+      if (from === -1 || target === -1) return current;
+      next.splice(from, 1);
+      let insertAt = target;
+      if (from < target) insertAt -= 1;
+      if (pos === "after") insertAt += 1;
+      insertAt = Math.max(0, Math.min(next.length, insertAt));
+      next.splice(insertAt, 0, dragId);
+      return next;
+    });
   }
 
   function handleSave() {
     if (!id || locked || !policy) return;
     if (!canCompleteStep3(policy)) {
       const missing = getStep3MissingFields(policy);
-      setMessage(`저장 불가: 필수 항목/검토 체크를 완료하세요 (${missing.length}개 누락).`);
+      setMessage(`저장 불가: 필수 항목을 완료하세요 (${missing.length}개 누락).`);
       return;
     }
 
@@ -139,8 +251,18 @@ export default function PolicyPage() {
     setMessage("STEP3 저장 완료");
   }
 
+  function handleConfirm() {
+    handleSave();
+    setMessage("STEP3 확정 완료");
+  }
+
   const missing = policy ? getStep3MissingFields(policy) : [];
   const complete = policy ? canCompleteStep3(policy) : false;
+  const fieldMap = new Map(STEP3_CORE_FIELDS.map((f) => [f.key, f]));
+  const orderedFields = [
+    ...rowOrder.map((key) => fieldMap.get(key)).filter((f): f is { key: Step3CoreFieldKey; label: string } => Boolean(f)),
+    ...STEP3_CORE_FIELDS.filter((f) => !rowOrder.includes(f.key)),
+  ];
 
   return (
     <div ref={twoPaneRef} className="two-pane" style={twoPaneStyle}>
@@ -153,35 +275,230 @@ export default function PolicyPage() {
         <div style={policyMeaningStyle}>
           auto_approved = 초안 내부 저장 승인(배포 아님) · publish 승인 = 외부 반영 승인(휴먼 필수)
         </div>
+        <div style={modeSwitchWrapStyle}>
+          <div style={modeToggleStyle}>
+            <button
+              type="button"
+              onClick={() => setInputMode("table")}
+              style={{ ...modeToggleOptionStyle, ...(inputMode === "table" ? modeToggleOptionActiveStyle : {}) }}
+            >
+              표 모드
+            </button>
+            <button
+              type="button"
+              onClick={() => setInputMode("form")}
+              style={{ ...modeToggleOptionStyle, ...(inputMode === "form" ? modeToggleOptionActiveStyle : {}) }}
+            >
+              폼 모드
+            </button>
+          </div>
+        </div>
+        <div style={topActionRowStyle}>
+          <button onClick={handleSave} disabled={locked || !complete} style={buttonStyle}>
+            저장
+          </button>
+          <button onClick={handleConfirm} disabled={locked || !complete} style={buttonStyle}>
+            확정하기
+          </button>
+        </div>
 
-        {policy && (
+        {policy && inputMode === "table" && (
           <div style={sheetWrapStyle}>
             <div style={sheetHeaderRowStyle}>
               <div style={sheetHeadFieldStyle}>Field</div>
               <div style={sheetHeadValueStyle}>Value</div>
               <div style={sheetHeadNoteStyle}>Note</div>
             </div>
-            {STEP3_FIELDS.map((field) => (
-              <div key={field.key} style={sheetDataRowStyle}>
-                <div style={sheetFieldCellStyle}>{field.label}</div>
+            {orderedFields.map((field) => (
+              <div
+                key={field.key}
+                style={{
+                  ...sheetDataRowStyle,
+                  ...(dropRowId === field.key && dropPosition === "before" ? { borderTop: "2px solid #3b82f6" } : {}),
+                  ...(dropRowId === field.key && dropPosition === "after" ? { borderBottom: "2px solid #3b82f6" } : {}),
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                  const pos: RowOrderPosition = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                  setDropRowId(field.key);
+                  setDropPosition(pos);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (!dragRowId || !dropRowId) return;
+                  moveRow(dragRowId, dropRowId, dropPosition);
+                  setDropRowId(null);
+                  setDragRowId(null);
+                  setMessage("STEP3 행 순서가 변경되었습니다.");
+                }}
+                onDragLeave={() => setDropRowId(null)}
+              >
+                <div style={sheetFieldCellStyle}>
+                  <button
+                    type="button"
+                    draggable
+                    style={rowDragHandleStyle}
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", field.key);
+                      setDragRowId(field.key);
+                    }}
+                    onDragEnd={() => {
+                      setDragRowId(null);
+                      setDropRowId(null);
+                    }}
+                    title="드래그해서 행 순서 변경"
+                  >
+                    ≡
+                  </button>
+                  <span>{field.label}</span>
+                </div>
                 <div style={sheetValueCellStyle}>
-                  <textarea
-                    value={policy[field.key]}
-                    onChange={(e) => updateField(field.key, e.target.value)}
-                    disabled={locked}
-                    style={sheetValueInputStyle}
-                  />
+                  <div style={sheetValueInnerStyle}>
+                    <div
+                      ref={openSelectRowId === field.key ? activeSelectWrapRef : null}
+                      style={sheetSelectWrapStyle}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (locked) return;
+                          setOpenSelectRowId((prev) => (prev === field.key ? null : field.key));
+                        }}
+                        disabled={locked}
+                        style={sheetSelectTriggerStyle}
+                      >
+                        <span>{getSelectedOption(field.key, policy[field.key]) || "선택"}</span>
+                        <span style={sheetSelectChevronStyle}>{openSelectRowId === field.key ? "▴" : "▾"}</span>
+                      </button>
+                      {!locked && openSelectRowId === field.key && (
+                        <div style={sheetSelectMenuStyle}>
+                          {STEP3_SELECT_OPTIONS[field.key].map((option) => {
+                            const selected = getSelectedOption(field.key, policy[field.key]) === option;
+                            return (
+                              <button
+                                key={option}
+                                type="button"
+                                onClick={() => {
+                                  updateCoreSelectField(field.key, option);
+                                  setOpenSelectRowId(null);
+                                }}
+                                style={{
+                                  ...sheetSelectOptionStyle,
+                                  ...(selected ? sheetSelectOptionActiveStyle : {}),
+                                }}
+                              >
+                                {option}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    {field.key === "data_assetization_strategy" && (
+                      <textarea
+                        value={storageNote}
+                        onChange={(e) => updateStorageNote(e.target.value)}
+                        disabled={locked}
+                        style={sheetValueInputStyle}
+                        placeholder="추가 기준을 텍스트로 입력하세요."
+                      />
+                    )}
+                  </div>
                 </div>
                 <div style={sheetNoteCellStyle}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#6b7280" }}>
-                    <input
-                      type="checkbox"
-                      checked={policy.reviewed[field.key]}
-                      onChange={() => toggleReviewed(field.key)}
-                      disabled={locked}
-                    />
-                    검토 완료
-                  </label>
+                  <div style={sheetNoteTextStyle}>{STEP3_HELPER_TEXT[field.key]}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {policy && inputMode === "form" && (
+          <div style={formSheetWrapStyle}>
+            <div style={formSheetHeaderRowStyle}>
+              <div style={formSheetHeadFieldStyle}>Field</div>
+              <div style={formSheetHeadValueStyle}>Value</div>
+              <div style={formSheetHeadNoteStyle}>Note</div>
+            </div>
+            {orderedFields.map((field) => (
+              <div
+                key={field.key}
+                style={{
+                  ...formSheetDataRowStyle,
+                  ...(dropRowId === field.key && dropPosition === "before" ? { borderTop: "2px solid #3b82f6" } : {}),
+                  ...(dropRowId === field.key && dropPosition === "after" ? { borderBottom: "2px solid #3b82f6" } : {}),
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                  const pos: RowOrderPosition = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                  setDropRowId(field.key);
+                  setDropPosition(pos);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (!dragRowId || !dropRowId) return;
+                  moveRow(dragRowId, dropRowId, dropPosition);
+                  setDropRowId(null);
+                  setDragRowId(null);
+                  setMessage("STEP3 행 순서가 변경되었습니다.");
+                }}
+                onDragLeave={() => setDropRowId(null)}
+              >
+                <div style={formSheetFieldCellStyle}>
+                  <button
+                    type="button"
+                    draggable
+                    style={rowDragHandleStyle}
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", field.key);
+                      setDragRowId(field.key);
+                    }}
+                    onDragEnd={() => {
+                      setDragRowId(null);
+                      setDropRowId(null);
+                    }}
+                    title="드래그해서 행 순서 변경"
+                  >
+                    ≡
+                  </button>
+                  <span>{field.label}</span>
+                </div>
+                <div style={formSheetValueCellStyle}>
+                  <div style={sheetValueInnerStyle}>
+                    <div style={sheetChoiceListStyle}>
+                      {STEP3_SELECT_OPTIONS[field.key].map((option) => {
+                        const checked = getSelectedOption(field.key, policy[field.key]) === option;
+                        return (
+                          <label key={option} style={sheetChoiceItemStyle}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => updateCoreSelectField(field.key, checked ? "" : option)}
+                              disabled={locked}
+                              style={sheetChoiceCheckboxStyle}
+                            />
+                            <span>{option}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {field.key === "data_assetization_strategy" && (
+                      <textarea
+                        value={storageNote}
+                        onChange={(e) => updateStorageNote(e.target.value)}
+                        disabled={locked}
+                        style={sheetValueInputStyle}
+                        placeholder="추가 기준을 텍스트로 입력하세요."
+                      />
+                    )}
+                  </div>
+                </div>
+                <div style={formSheetNoteCellStyle}>
+                  <div style={sheetNoteTextStyle}>{STEP3_HELPER_TEXT[field.key]}</div>
                 </div>
               </div>
             ))}
@@ -190,13 +507,10 @@ export default function PolicyPage() {
 
         {!locked && (
           <p style={{ ...subtleStyle, marginTop: 10 }}>
-            완료 조건: 필수 항목 12개 입력 + 검토 체크 12개 완료 ({complete ? "충족" : "미충족"})
+            완료 조건: 필수 항목 3개 입력 ({complete ? "충족" : "미충족"})
           </p>
         )}
 
-        <button onClick={handleSave} disabled={locked || !complete} style={{ ...buttonStyle, marginTop: 12 }}>
-          저장
-        </button>
         {message && <p style={{ ...subtleStyle, marginTop: 8 }}>{message}</p>}
       </section>
 
@@ -327,11 +641,30 @@ const subtleStyle: CSSProperties = {
   fontSize: 13,
 };
 
-const inputStyle: CSSProperties = {
+const modeSwitchWrapStyle: CSSProperties = {
+  marginTop: 10,
+};
+
+const modeToggleStyle: CSSProperties = {
+  display: "inline-flex",
   border: "1px solid #d1d5db",
   borderRadius: 8,
-  padding: "8px 10px",
-  fontSize: 14,
+  overflow: "hidden",
+  background: "#fff",
+};
+
+const modeToggleOptionStyle: CSSProperties = {
+  border: "none",
+  background: "transparent",
+  padding: "8px 12px",
+  fontSize: 13,
+  cursor: "pointer",
+  color: "#374151",
+};
+
+const modeToggleOptionActiveStyle: CSSProperties = {
+  background: "#111827",
+  color: "#fff",
 };
 
 const sheetWrapStyle: CSSProperties = {
@@ -344,7 +677,7 @@ const sheetWrapStyle: CSSProperties = {
 
 const sheetHeaderRowStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "260px minmax(0, 1fr) 180px",
+  gridTemplateColumns: "260px minmax(0, 1fr) 320px",
   background: "#f3f4f6",
   borderBottom: "1px solid #bfc9d9",
   fontSize: 12,
@@ -368,9 +701,10 @@ const sheetHeadNoteStyle: CSSProperties = {
 
 const sheetDataRowStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "260px minmax(0, 1fr) 180px",
+  gridTemplateColumns: "260px minmax(0, 1fr) 320px",
   borderBottom: "1px solid #eef2f7",
   minHeight: 92,
+  background: "#fff",
 };
 
 const sheetFieldCellStyle: CSSProperties = {
@@ -381,30 +715,122 @@ const sheetFieldCellStyle: CSSProperties = {
   color: "#374151",
   display: "flex",
   alignItems: "center",
+  gap: 8,
 };
 
 const sheetValueCellStyle: CSSProperties = {
   borderRight: "1px solid #e5e7eb",
 };
 
-const sheetValueInputStyle: CSSProperties = {
-  width: "100%",
-  minHeight: 92,
-  border: "none",
-  outline: "none",
-  resize: "vertical",
+const sheetValueInnerStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
   padding: "10px 12px",
+  background: "#fff",
+};
+
+const sheetChoiceListStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const sheetSelectWrapStyle: CSSProperties = {
+  position: "relative",
+};
+
+const sheetSelectTriggerStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 44,
+  border: "1px solid #cbd5e1",
+  borderRadius: 12,
+  background: "#ffffff",
+  color: "#1f2937",
+  fontSize: 14,
+  padding: "10px 14px",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  cursor: "pointer",
+  textAlign: "left",
+};
+
+const sheetSelectChevronStyle: CSSProperties = {
+  color: "#94a3b8",
+  fontSize: 12,
+  lineHeight: 1,
+};
+
+const sheetSelectMenuStyle: CSSProperties = {
+  position: "absolute",
+  left: 0,
+  right: 0,
+  top: 50,
+  zIndex: 30,
+  border: "1px solid #cbd5e1",
+  borderRadius: 14,
+  background: "#fff",
+  boxShadow: "0 16px 30px rgba(15, 23, 42, 0.14)",
+  padding: 10,
+  display: "grid",
+  gap: 6,
+};
+
+const sheetSelectOptionStyle: CSSProperties = {
+  border: "none",
+  background: "transparent",
+  borderRadius: 10,
+  padding: "12px 14px",
+  textAlign: "left",
   fontSize: 14,
   color: "#1f2937",
-  background: "transparent",
+  cursor: "pointer",
+};
+
+const sheetSelectOptionActiveStyle: CSSProperties = {
+  background: "#dbeafe",
+  color: "#1d4ed8",
+  fontWeight: 700,
+};
+
+const sheetChoiceItemStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 14,
+  color: "#1f2937",
+  minHeight: 24,
+};
+
+const sheetChoiceCheckboxStyle: CSSProperties = {
+  width: 16,
+  height: 16,
+};
+
+const sheetValueInputStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 72,
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  outline: "none",
+  resize: "vertical",
+  padding: "8px 10px",
+  fontSize: 14,
+  color: "#1f2937",
+  background: "#fff",
   lineHeight: 1.45,
   fontFamily: "inherit",
 };
 
 const sheetNoteCellStyle: CSSProperties = {
   padding: "10px 12px",
-  display: "flex",
-  alignItems: "flex-start",
+};
+
+const sheetNoteTextStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 13,
+  color: "#9ca3af",
+  lineHeight: 1.45,
+  whiteSpace: "pre-wrap",
 };
 
 const buttonStyle: CSSProperties = {
@@ -414,6 +840,72 @@ const buttonStyle: CSSProperties = {
   background: "#fff",
   fontWeight: 700,
   cursor: "pointer",
+};
+
+const topActionRowStyle: CSSProperties = {
+  marginTop: 10,
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 8,
+};
+
+const formSheetWrapStyle: CSSProperties = {
+  marginTop: 12,
+  border: "1px solid #cbd5e1",
+  borderRadius: 10,
+  overflow: "hidden",
+  background: "#fff",
+};
+
+const formSheetHeaderRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "260px minmax(0, 1fr) 320px",
+  background: "#f3f4f6",
+  borderBottom: "1px solid #bfc9d9",
+  fontSize: 12,
+  fontWeight: 700,
+  color: "#374151",
+};
+
+const formSheetHeadFieldStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRight: "1px solid #e5e7eb",
+};
+
+const formSheetHeadValueStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRight: "1px solid #e5e7eb",
+};
+
+const formSheetHeadNoteStyle: CSSProperties = {
+  padding: "10px 12px",
+};
+
+const formSheetDataRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "260px minmax(0, 1fr) 320px",
+  borderBottom: "1px solid #eef2f7",
+  minHeight: 92,
+  background: "#fff",
+};
+
+const formSheetFieldCellStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRight: "1px solid #e5e7eb",
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#374151",
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+};
+
+const formSheetValueCellStyle: CSSProperties = {
+  borderRight: "1px solid #e5e7eb",
+};
+
+const formSheetNoteCellStyle: CSSProperties = {
+  padding: "10px 12px",
 };
 
 const topPanelTabStyle: CSSProperties = {
@@ -449,4 +941,15 @@ const policyMeaningStyle: CSSProperties = {
   color: "#1e3a8a",
   fontSize: 12,
   fontWeight: 700,
+};
+
+const rowDragHandleStyle: CSSProperties = {
+  border: "none",
+  background: "transparent",
+  color: "#9ca3af",
+  cursor: "grab",
+  fontSize: 15,
+  fontWeight: 700,
+  lineHeight: 1,
+  padding: 0,
 };
