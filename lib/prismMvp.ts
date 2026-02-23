@@ -61,6 +61,41 @@ export type Step2Data = {
   >;
 };
 
+export type Step2FlowSourceTagKey =
+  | "step1"
+  | "ai_task_types"
+  | "hitl"
+  | "result_state"
+  | "final_executor"
+  | "exposure"
+  | "step2_user_flow"
+  | "step2_ai_intervention"
+  | "step2_human_control"
+  | "step2_system_process";
+
+export type Step2FlowSourceTag = {
+  key: Step2FlowSourceTagKey;
+  label: string;
+};
+
+export type Step2FlowStep = {
+  id: string;
+  label: string;
+  source_tags: Step2FlowSourceTag[];
+};
+
+export type Step2PreviewSlot = {
+  value: string;
+  source_tags: Step2FlowSourceTag[];
+};
+
+export type Step2FlowPreviewModel = {
+  flow_steps: Step2FlowStep[];
+  ai_intervention: Step2PreviewSlot;
+  human_control: Step2PreviewSlot;
+  system_process: Step2PreviewSlot;
+};
+
 export type Step4Row = {
   rowId: Step4RowId;
   title: string;
@@ -943,7 +978,53 @@ export function generateStep2Draft(step1: Step1Data): string {
   return step2ToText(generateStep2Data(step1));
 }
 
-export function generateStep2Data(step1: Step1Data): Step2Data {
+function slugifyFlowLabel(label: string): string {
+  const ascii = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return ascii || "step";
+}
+
+function parseFlowStepsFromText(text: string): string[] {
+  return text
+    .split(/->|→|\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function toTaskSourceLabel(taskType: Step1AiTaskType): string {
+  if (taskType === "draft_generation") return "작업유형: 초안 생성 (draft_generation)";
+  if (taskType === "candidate_suggestion") return "작업유형: 후보 제시 (candidate_suggestion)";
+  if (taskType === "revision_suggestion") return "작업유형: 개선 제안 (revision_suggestion)";
+  if (taskType === "policy_check") return "작업유형: 정책 점검 (policy_check)";
+  if (taskType === "classification") return "작업유형: 분류 (classification)";
+  return "작업유형: 승인 보조 (approval_assist)";
+}
+
+function toHitlSourceLabel(hitl: Step1Hitl): string {
+  if (hitl === "pre_review") return "인간개입: 사전 검토 (pre_review)";
+  if (hitl === "post_monitoring") return "인간개입: 사후 모니터링 (post_monitoring)";
+  return "인간개입: 없음 (none)";
+}
+
+function toResultStateSourceLabel(resultState: Step1ResultState): string {
+  if (resultState === "draft_saved") return "결과상태: 초안 저장 (draft_saved)";
+  if (resultState === "status_changed") return "결과상태: 상태 변경 (status_changed)";
+  if (resultState === "review_requested") return "결과상태: 검토/승인 요청 (review_requested)";
+  if (resultState === "published_or_executed") return "결과상태: 게시/실행 완료 (published_or_executed)";
+  if (resultState === "reference_saved") return "결과상태: 참고자료 저장 (reference_saved)";
+  if (resultState === "action_triggered") return "결과상태: 후속 액션 트리거 (action_triggered)";
+  if (resultState === "task_created") return "결과상태: 작업 생성 (task_created)";
+  if (resultState === "ephemeral_response") return "결과상태: 저장 없음 (ephemeral_response)";
+  if (resultState === "failed") return "결과상태: 실패 (failed)";
+  return "결과상태: 취소/중단 (cancelled)";
+}
+
+function toExposureSourceLabel(exposure: Step1Exposure): string {
+  if (exposure === "public") return "노출범위: 전체 공개 (public)";
+  if (exposure === "limited_external") return "노출범위: 제한적 노출 (limited_external)";
+  return "노출범위: 내부 참고 (internal)";
+}
+
+function buildStep2FlowStepsFromStep1(step1: Step1Data): Step2FlowStep[] {
   const taskSet = new Set(step1.ai_task_types);
   const hasDraftGeneration = taskSet.has("draft_generation");
   const hasCandidateSuggestion = taskSet.has("candidate_suggestion");
@@ -951,47 +1032,160 @@ export function generateStep2Data(step1: Step1Data): Step2Data {
   const hasPolicyCheck = taskSet.has("policy_check");
   const hasClassification = taskSet.has("classification");
   const hasApprovalAssist = taskSet.has("approval_assist");
-
   const requiresPreReview = step1.hitl === "pre_review" || step1.result_state === "review_requested";
+  const needsTextInputStep = hasDraftGeneration || hasRevisionSuggestion || hasClassification;
 
-  const aiIntervention =
-    step1.final_executor === "automatic"
-      ? "자동 실행 (Automatic Execution)"
-      : hasPolicyCheck || hasClassification
-        ? "조건부 실행 (Conditional Execution)"
-        : "버튼 실행 (Button Triggered)";
-
-  const flowSteps: string[] = ["프로젝트 생성", "입력 작성"];
-  if (hasDraftGeneration) flowSteps.push("초안 생성");
-  if (hasCandidateSuggestion) flowSteps.push("후보 제시");
-  if (hasRevisionSuggestion) flowSteps.push("개선 제안");
-  if (hasPolicyCheck) flowSteps.push("정책 점검");
-  if (hasClassification) flowSteps.push("입력 분류");
-  if (requiresPreReview) flowSteps.push("사전 검토");
-  if (hasApprovalAssist) flowSteps.push("승인 보조");
-  if (step1.result_state) {
-    flowSteps.push(`결과 기록(${step1.result_state})`);
+  const sourceStep1: Step2FlowSourceTag = { key: "step1", label: "자동 생성: 공통 시작 단계" };
+  const steps: Array<{ label: string; source_tags: Step2FlowSourceTag[] }> = [{ label: "요청 시작", source_tags: [sourceStep1] }];
+  if (needsTextInputStep) {
+    steps.push({ label: "입력 작성", source_tags: [sourceStep1] });
   }
 
+  if (hasDraftGeneration) {
+    steps.push({ label: "초안 생성", source_tags: [{ key: "ai_task_types", label: toTaskSourceLabel("draft_generation") }] });
+  }
+  if (hasCandidateSuggestion) {
+    steps.push({ label: "후보 제시", source_tags: [{ key: "ai_task_types", label: toTaskSourceLabel("candidate_suggestion") }] });
+  }
+  if (hasRevisionSuggestion) {
+    steps.push({ label: "개선 제안", source_tags: [{ key: "ai_task_types", label: toTaskSourceLabel("revision_suggestion") }] });
+  }
+  if (hasPolicyCheck) {
+    steps.push({ label: "정책 점검", source_tags: [{ key: "ai_task_types", label: toTaskSourceLabel("policy_check") }] });
+  }
+  if (hasClassification) {
+    steps.push({ label: "입력 분류", source_tags: [{ key: "ai_task_types", label: toTaskSourceLabel("classification") }] });
+  }
+  if (requiresPreReview) {
+    const tags: Step2FlowSourceTag[] = [];
+    if (step1.hitl === "pre_review") tags.push({ key: "hitl", label: toHitlSourceLabel("pre_review") });
+    if (step1.result_state === "review_requested") tags.push({ key: "result_state", label: toResultStateSourceLabel("review_requested") });
+    steps.push({ label: "사전 검토", source_tags: tags.length > 0 ? tags : [sourceStep1] });
+  }
+  if (hasApprovalAssist) {
+    steps.push({ label: "승인 보조", source_tags: [{ key: "ai_task_types", label: toTaskSourceLabel("approval_assist") }] });
+  }
+  if (step1.result_state) {
+    steps.push({
+      label: `결과 기록(${step1.result_state})`,
+      source_tags: [{ key: "result_state", label: toResultStateSourceLabel(step1.result_state) }],
+    });
+  }
+
+  return steps.map((step, index) => ({
+    id: `flow-${index}-${slugifyFlowLabel(step.label)}`,
+    label: step.label,
+    source_tags: step.source_tags,
+  }));
+}
+
+function buildStep2AiIntervention(step1: Step1Data): Step2PreviewSlot {
+  const taskSet = new Set(step1.ai_task_types);
+  if (step1.final_executor === "automatic") {
+    return {
+      value: "자동 실행 (Automatic Execution)",
+      source_tags: [{ key: "final_executor", label: "실행주체: 자동 실행 (automatic)" }],
+    };
+  }
+  if (taskSet.has("policy_check") || taskSet.has("classification")) {
+    return {
+      value: "조건부 실행 (Conditional Execution)",
+      source_tags: [{ key: "ai_task_types", label: "작업유형: 정책 점검/분류 포함 (policy_check/classification)" }],
+    };
+  }
+  return {
+    value: "버튼 실행 (Button Triggered)",
+    source_tags: [{ key: "step1", label: "Step1 자동 생성 규칙" }],
+  };
+}
+
+function buildStep2HumanControl(step1: Step1Data): Step2PreviewSlot {
+  if (step1.hitl === "pre_review") {
+    return {
+      value: "승인 필수 (Review Required)",
+      source_tags: [{ key: "hitl", label: toHitlSourceLabel("pre_review") }],
+    };
+  }
+  if (step1.hitl === "post_monitoring") {
+    return {
+      value: "조건부 승인 (Conditional Review)",
+      source_tags: [{ key: "hitl", label: toHitlSourceLabel("post_monitoring") }],
+    };
+  }
+  return {
+    value: "승인 없음 (No Review)",
+    source_tags: [{ key: "hitl", label: toHitlSourceLabel("none") }],
+  };
+}
+
+function buildStep2SystemProcess(step1: Step1Data): Step2PreviewSlot {
   const exposurePolicy =
     step1.exposure === "public"
       ? "외부 공개 단계는 승인(휴먼 검토) 필수"
       : step1.exposure === "limited_external"
         ? "제한적 외부 노출은 정책 기준 충족 시 승인"
         : "내부 참고용은 내부 정책 기준으로 처리";
-  const humanControl =
-    step1.hitl === "pre_review"
-      ? "승인 필수 (Review Required)"
-      : step1.hitl === "post_monitoring"
-        ? "조건부 승인 (Conditional Review)"
-        : "승인 없음 (No Review)";
+  return {
+    value: `입력값 검증 -> AI 호출/트리거 실행 -> 결과 저장 -> 상태 반영 (실패 시 failed), 정책: ${exposurePolicy}`,
+    source_tags: [{ key: "exposure", label: toExposureSourceLabel(step1.exposure || "internal") }],
+  };
+}
+
+export function buildStep2FlowPreview(step1: Step1Data, step2?: Step2Data): Step2FlowPreviewModel {
+  const generatedFlow = buildStep2FlowStepsFromStep1(step1);
+  const generatedAi = buildStep2AiIntervention(step1);
+  const generatedHuman = buildStep2HumanControl(step1);
+  const generatedSystem = buildStep2SystemProcess(step1);
+
+  const flowLabels = step2?.user_flow.trim() ? parseFlowStepsFromText(step2.user_flow) : generatedFlow.map((step) => step.label);
+  const usedGeneratedIndices = new Set<number>();
+  const flow_steps = flowLabels.map((label, index) => {
+    const generatedIndex = generatedFlow.findIndex((step, idx) => !usedGeneratedIndices.has(idx) && step.label === label);
+    if (generatedIndex >= 0) {
+      usedGeneratedIndices.add(generatedIndex);
+      return {
+        id: `flow-${index}-${slugifyFlowLabel(label)}`,
+        label,
+        source_tags: generatedFlow[generatedIndex].source_tags,
+      };
+    }
+    return {
+      id: `flow-${index}-${slugifyFlowLabel(label)}`,
+      label,
+      source_tags: [],
+    };
+  });
+
+  const ai_intervention =
+    step2?.ai_intervention.trim()
+      ? { value: step2.ai_intervention.trim(), source_tags: [] }
+      : generatedAi;
+  const human_control =
+    step2?.human_control.trim()
+      ? { value: step2.human_control.trim(), source_tags: [] }
+      : generatedHuman;
+  const system_process =
+    step2?.system_process.trim()
+      ? { value: step2.system_process.trim(), source_tags: [] }
+      : generatedSystem;
+
+  return {
+    flow_steps,
+    ai_intervention,
+    human_control,
+    system_process,
+  };
+}
+
+export function generateStep2Data(step1: Step1Data): Step2Data {
+  const preview = buildStep2FlowPreview(step1);
 
   return {
     ...getDefaultStep2(),
-    user_flow: flowSteps.join(" -> "),
-    ai_intervention: aiIntervention,
-    system_process: `입력값 검증 -> AI 호출/트리거 실행 -> 결과 저장 -> 상태 반영 (실패 시 failed), 정책: ${exposurePolicy}`,
-    human_control: humanControl,
+    user_flow: preview.flow_steps.map((step) => step.label).join(" -> "),
+    ai_intervention: preview.ai_intervention.value,
+    system_process: preview.system_process.value,
+    human_control: preview.human_control.value,
   };
 }
 

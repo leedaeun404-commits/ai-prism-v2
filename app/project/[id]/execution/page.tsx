@@ -844,7 +844,7 @@ export default function ExecutionPage() {
             <p style={{ ...subtleStyle, marginTop: 8 }}>
               GUIDED 모드에서는 STEP1 확정 후 STEP2/3/4 탭에 접근할 수 있습니다.
             </p>
-            <Step1PreviewPanel data={step1} activeArea={activePreviewArea} onAreaClick={setActivePreviewArea} />
+            <Step1PreviewPanel data={step1} step2Data={draft} mode="step2" activeArea={activePreviewArea} onAreaClick={setActivePreviewArea} />
             {!locked && missing.length > 0 && (
               <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
                 <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>누락 항목</div>
