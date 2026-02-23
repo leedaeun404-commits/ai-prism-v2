@@ -74,7 +74,7 @@ export default function PolicyPage() {
   const [dropPosition, setDropPosition] = useState<RowOrderPosition>("after");
   const [openSelectRowId, setOpenSelectRowId] = useState<Step3CoreFieldKey | null>(null);
   const [rightPanelTab, setRightPanelTab] = useState<"preview" | "impact">("preview");
-  const [rightPanelWidth, setRightPanelWidth] = useState(360);
+  const [rightPanelWidth, setRightPanelWidth] = useState(420);
   const [isResizing, setIsResizing] = useState(false);
   const twoPaneRef = useRef<HTMLDivElement | null>(null);
   const activeSelectWrapRef = useRef<HTMLDivElement | null>(null);
@@ -267,7 +267,7 @@ export default function PolicyPage() {
   return (
     <div ref={twoPaneRef} className="two-pane" style={twoPaneStyle}>
       <section style={mainPanelStyle}>
-        <h1 style={titleStyle}>STEP 3 자동화/리스크</h1>
+        <h1 style={titleStyle}>STEP 3 운영 정책</h1>
 
         {locked && <div style={lockStyle}>🔒 STEP1 확정 전에는 접근할 수 없습니다.</div>}
 

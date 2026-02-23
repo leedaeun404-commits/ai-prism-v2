@@ -97,7 +97,7 @@ export default function ExecutionPage() {
   const [editingRowId, setEditingRowId] = useState<Step2FieldKey | null>(null);
   const [editingNoteRowId, setEditingNoteRowId] = useState<Step2FieldKey | null>(null);
   const [openSelectRowId, setOpenSelectRowId] = useState<Step2SelectFieldKey | null>(null);
-  const [rightPanelWidth, setRightPanelWidth] = useState(360);
+  const [rightPanelWidth, setRightPanelWidth] = useState(420);
   const [isResizing, setIsResizing] = useState(false);
   const twoPaneRef = useRef<HTMLDivElement | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
@@ -461,7 +461,7 @@ export default function ExecutionPage() {
   return (
     <div ref={twoPaneRef} className="two-pane" style={twoPaneStyle}>
       <section style={mainPanelStyle}>
-        <h1 style={{ ...titleStyle, display: "none" }}>STEP 2 설계 초안</h1>
+        <h1 style={{ ...titleStyle, display: "none" }}>STEP 2 플로우 설계</h1>
 
         {locked && (
           <div style={lockStyle}>

@@ -72,16 +72,16 @@ export type Step4Row = {
 export type Step4TabKey = "state" | "sequence" | "error_retry" | "auth" | "dataflow" | "observability" | "pipeline" | "rollback" | "cost" | "ia";
 
 export type Step4RowId =
+  | "state_model"
   | "api_definition"
   | "input_schema"
-  | "output_schema"
-  | "state_model";
+  | "output_schema";
 
 export const TECH_SPEC_ROW_DEFS: Array<Pick<Step4Row, "rowId" | "title" | "relatedTabs">> = [
-  { rowId: "api_definition", title: "API 정의", relatedTabs: ["sequence", "auth", "pipeline"] },
-  { rowId: "input_schema", title: "입력 스키마", relatedTabs: ["dataflow", "sequence"] },
-  { rowId: "output_schema", title: "출력 스키마", relatedTabs: ["dataflow", "sequence"] },
-  { rowId: "state_model", title: "상태 모델", relatedTabs: ["state", "pipeline", "rollback"] },
+  { rowId: "state_model", title: "상태 모델 (State Model)", relatedTabs: ["state", "pipeline", "rollback"] },
+  { rowId: "api_definition", title: "API 정의 (API Definition)", relatedTabs: ["sequence", "auth", "pipeline"] },
+  { rowId: "input_schema", title: "입력 스키마 (Input Schema)", relatedTabs: ["dataflow", "sequence"] },
+  { rowId: "output_schema", title: "출력 스키마 (Output Schema)", relatedTabs: ["dataflow", "sequence"] },
 ];
 
 type Step3FieldKey =
@@ -155,10 +155,10 @@ export type HistoryEvent = {
 const NS = "prism2:mvp";
 const STEP4_TAB_KEYS = ["state", "sequence", "error_retry", "auth", "dataflow", "observability", "pipeline", "rollback", "cost", "ia"] as const;
 const STEP4_ROW_IDS = [
+  "state_model",
   "api_definition",
   "input_schema",
   "output_schema",
-  "state_model",
 ] as const;
 const STEP2_REVIEW_KEYS = [
   "user_flow",

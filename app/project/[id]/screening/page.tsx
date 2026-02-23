@@ -313,7 +313,7 @@ export default function ScreeningPage() {
   const [dragRowId, setDragRowId] = useState<Step1TableRowId | null>(null);
   const [dropRowId, setDropRowId] = useState<Step1TableRowId | null>(null);
   const [dropPosition, setDropPosition] = useState<"before" | "after">("after");
-  const [rightPanelWidth, setRightPanelWidth] = useState(360);
+  const [rightPanelWidth, setRightPanelWidth] = useState(420);
   const [isResizing, setIsResizing] = useState(false);
   const twoPaneRef = useRef<HTMLDivElement | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);

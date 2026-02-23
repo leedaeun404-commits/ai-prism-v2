@@ -46,22 +46,22 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
     () => [
       {
         href: `/project/${id}/screening`,
-        label: "STEP 1 전략&방향",
+        label: "STEP 1 문제 정의",
         locked: false,
       },
       {
         href: `/project/${id}/execution`,
-        label: "STEP 2 설계 초안",
+        label: "STEP 2 플로우 설계",
         locked: !progress.step1Frozen,
       },
       {
         href: `/project/${id}/policy`,
-        label: "STEP 3 자동화/리스크",
+        label: "STEP 3 운영 정책",
         locked: !progress.step1Frozen,
       },
       {
         href: `/project/${id}/tech-spec`,
-        label: "STEP 4 기술 스펙",
+        label: "STEP 4 기술 명세",
         locked: !progress.step1Frozen,
       },
     ],
