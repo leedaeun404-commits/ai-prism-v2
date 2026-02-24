@@ -51,7 +51,7 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
       },
       {
         href: `/project/${id}/execution`,
-        label: "STEP 2 플로우 설계",
+        label: "STEP 2 플로우 확인",
         locked: !progress.step1Frozen,
       },
       {

@@ -1000,9 +1000,9 @@ function toTaskSourceLabel(taskType: Step1AiTaskType): string {
 }
 
 function toHitlSourceLabel(hitl: Step1Hitl): string {
-  if (hitl === "pre_review") return "인간개입: 사전 검토 (pre_review)";
-  if (hitl === "post_monitoring") return "인간개입: 사후 모니터링 (post_monitoring)";
-  return "인간개입: 없음 (none)";
+  if (hitl === "pre_review") return "사람개입: 사전 검토 (pre_review)";
+  if (hitl === "post_monitoring") return "사람개입: 사후 모니터링 (post_monitoring)";
+  return "사람개입: 없음 (none)";
 }
 
 function toResultStateSourceLabel(resultState: Step1ResultState): string {

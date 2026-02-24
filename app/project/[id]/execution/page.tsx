@@ -20,7 +20,7 @@ import {
   type Step1Data,
   type Step2Data,
 } from "@/lib/prismMvp";
-import Step1PreviewPanel, { type Step1PreviewAreaKey } from "../_components/Step1PreviewPanel";
+import Step1PreviewPanel, { type Step1PreviewAreaKey, type Step2PreviewFieldId } from "../_components/Step1PreviewPanel";
 
 type Step2FieldKey =
   | "user_flow"
@@ -68,11 +68,11 @@ const STEP2_SELECT_OPTIONS: Record<Step2SelectFieldKey, string[]> = {
 };
 
 const PREVIEW_TO_STEP2_FIELDS: Record<Step1PreviewAreaKey, Step2FieldKey[]> = {
-  strategy: ["user_flow"],
-  policy: ["system_process", "human_control"],
-  automation: ["ai_intervention", "human_control", "user_flow"],
-  state_flow: ["system_process", "user_flow"],
-  risk_profile: ["human_control", "system_process"],
+  strategy: [],
+  policy: [],
+  automation: ["ai_intervention", "human_control", "system_process"],
+  state_flow: ["user_flow"],
+  risk_profile: [],
 };
 
 export default function ExecutionPage() {
@@ -87,6 +87,7 @@ export default function ExecutionPage() {
   const [inputMode, setInputMode] = useState<InputMode>("table");
   const [rightPanelTab, setRightPanelTab] = useState<"preview" | "impact">("preview");
   const [activePreviewArea, setActivePreviewArea] = useState<Step1PreviewAreaKey | null>(null);
+  const [flowBaselineUserFlow, setFlowBaselineUserFlow] = useState("");
   const [rowOrder, setRowOrder] = useState<Step2FieldKey[]>(STEP2_DEFAULT_ORDER);
   const [dragRowId, setDragRowId] = useState<Step2FieldKey | null>(null);
   const [dropRowId, setDropRowId] = useState<Step2FieldKey | null>(null);
@@ -118,6 +119,7 @@ export default function ExecutionPage() {
     const existing = getStep2Data(id);
     setStep1(loadedStep1);
     setDraft(existing);
+    setFlowBaselineUserFlow(existing.user_flow);
 
     try {
       const raw = localStorage.getItem(`prism:mvp:${id}:step2:row-order`);
@@ -199,6 +201,7 @@ export default function ExecutionPage() {
       return false;
     }
     setStep2Data(id, draft);
+    setFlowBaselineUserFlow(draft.user_flow);
     const step1 = getStep1Data(id);
     const existingStep3 = getStep3Policy(id);
     const generatedStep3 = generateStep3Policy(step1, draft);
@@ -309,11 +312,18 @@ export default function ExecutionPage() {
   const missing = draft ? getStep2MissingFields(draft) : [];
   const complete = draft ? missing.length === 0 : false;
   const highlightedFields = new Set<Step2FieldKey>(activePreviewArea ? PREVIEW_TO_STEP2_FIELDS[activePreviewArea] : []);
-  const fieldMap = new Map(STEP2_FIELDS.map((f) => [f.key, f]));
-  const orderedFields = [
-    ...rowOrder.map((key) => fieldMap.get(key)).filter((f): f is { key: Step2FieldKey; label: string } => Boolean(f)),
-    ...STEP2_FIELDS.filter((f) => !rowOrder.includes(f.key)),
-  ];
+  const orderedFields = useMemo(() => {
+    const fieldMap = new Map(STEP2_FIELDS.map((f) => [f.key, f]));
+    return [
+      ...rowOrder.map((key) => fieldMap.get(key)).filter((f): f is { key: Step2FieldKey; label: string } => Boolean(f)),
+      ...STEP2_FIELDS.filter((f) => !rowOrder.includes(f.key)),
+    ];
+  }, [rowOrder]);
+  const activeStep2FieldId = useMemo<Step2PreviewFieldId | null>(() => {
+    if (editingRowId) return editingRowId;
+    if (activeCell) return (orderedFields[activeCell.row]?.key as Step2PreviewFieldId | undefined) ?? null;
+    return null;
+  }, [activeCell, editingRowId, orderedFields]);
   const selectedBounds = useMemo(() => {
     if (!selectionRange) return null;
     return {
@@ -461,7 +471,7 @@ export default function ExecutionPage() {
   return (
     <div ref={twoPaneRef} className="two-pane" style={twoPaneStyle}>
       <section style={mainPanelStyle}>
-        <h1 style={{ ...titleStyle, display: "none" }}>STEP 2 플로우 설계</h1>
+        <h1 style={{ ...titleStyle, display: "none" }}>STEP 2 플로우 확인</h1>
 
         {locked && (
           <div style={lockStyle}>
@@ -844,7 +854,15 @@ export default function ExecutionPage() {
             <p style={{ ...subtleStyle, marginTop: 8 }}>
               GUIDED 모드에서는 STEP1 확정 후 STEP2/3/4 탭에 접근할 수 있습니다.
             </p>
-            <Step1PreviewPanel data={step1} step2Data={draft} mode="step2" activeArea={activePreviewArea} onAreaClick={setActivePreviewArea} />
+            <Step1PreviewPanel
+              data={step1}
+              step2Data={draft}
+              flowBaselineUserFlow={flowBaselineUserFlow}
+              mode="step2"
+              activeStep2FieldId={activeStep2FieldId}
+              activeArea={activePreviewArea}
+              onAreaClick={setActivePreviewArea}
+            />
             {!locked && missing.length > 0 && (
               <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
                 <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>누락 항목</div>
@@ -919,6 +937,12 @@ const mainPanelStyle: CSSProperties = {
 const sidePanelStyle: CSSProperties = {
   ...panelStyle,
   flexShrink: 0,
+  position: "sticky",
+  top: 12,
+  height: "calc(100vh - 24px)",
+  minHeight: 0,
+  overflowY: "auto",
+  overscrollBehavior: "contain",
 };
 
 const titleStyle: CSSProperties = {
@@ -1046,7 +1070,7 @@ const sheetSelectWrapStyle: CSSProperties = {
 const sheetSelectTriggerStyle: CSSProperties = {
   width: "100%",
   minHeight: 44,
-  border: "1px solid #cbd5e1",
+  border: "1px solid #e7edf4",
   borderRadius: 12,
   background: "#ffffff",
   color: "#1f2937",

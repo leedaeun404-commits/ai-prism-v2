@@ -26,7 +26,7 @@ import {
   type Step1Reversibility,
   type Step1Target,
 } from "@/lib/prismMvp";
-import Step1PreviewPanel, { type Step1PreviewAreaKey } from "../_components/Step1PreviewPanel";
+import Step1PreviewPanel, { type Step1PreviewAreaKey, type Step1PreviewRowId } from "../_components/Step1PreviewPanel";
 
 const TARGET_OPTIONS: Array<{ value: Step1Target; label: string }> = [
   { value: "internal_staff", label: "내부 실무자" },
@@ -495,6 +495,11 @@ export default function ScreeningPage() {
     () => new Set<Step1TableRowId>(activePreviewArea ? PREVIEW_AREA_ROW_IDS[activePreviewArea] : []),
     [activePreviewArea]
   );
+  const activePreviewRowId = useMemo<Step1PreviewRowId | null>(() => {
+    if (editingRowId) return editingRowId;
+    if (activeCell) return (tableRows[activeCell.row]?.id as Step1PreviewRowId | undefined) ?? null;
+    return null;
+  }, [activeCell, editingRowId, tableRows]);
   const isDirty = useMemo(() => {
     if (!savedDataSnapshot || !savedNotesSnapshot || !savedRowOrderSnapshot) return false;
     const normalizeNotes = (notes: Step1TableNotes) =>
@@ -1362,9 +1367,7 @@ export default function ScreeningPage() {
                                 type="button"
                                 style={{
                                   ...sheetDropdownOptionStyle,
-                                  background: selected ? "#eff6ff" : "#fff",
-                                  color: selected ? "#1d4ed8" : "#1f2937",
-                                  fontWeight: selected ? 700 : 500,
+                                  ...(selected ? sheetDropdownOptionActiveStyle : {}),
                                 }}
                                 onClick={() => {
                                   updateTableCell(row.id, option.value);
@@ -1480,7 +1483,12 @@ export default function ScreeningPage() {
         {rightPanelTab === "preview" && (
           <>
             <p style={{ ...subtleStyle, marginTop: 8 }}>입력값이 구조로 실시간 반영됩니다.</p>
-            <Step1PreviewPanel data={data} activeArea={activePreviewArea} onAreaClick={setActivePreviewArea} />
+            <Step1PreviewPanel
+              data={data}
+              activeRowId={activePreviewRowId}
+              activeArea={activePreviewArea}
+              onAreaClick={setActivePreviewArea}
+            />
           </>
         )}
 
@@ -1593,6 +1601,12 @@ const mainPanelStyle: CSSProperties = {
 const sidePanelStyle: CSSProperties = {
   ...panelStyle,
   flexShrink: 0,
+  position: "sticky",
+  top: 12,
+  height: "calc(100vh - 24px)",
+  minHeight: 0,
+  overflowY: "auto",
+  overscrollBehavior: "contain",
 };
 
 const titleStyle: CSSProperties = {
@@ -1789,6 +1803,11 @@ const sheetValueSelectDisplayStyle: CSSProperties = {
   alignItems: "center",
   justifyContent: "space-between",
   gap: 8,
+  minHeight: 44,
+  border: "1px solid #e7edf4",
+  borderRadius: 12,
+  padding: "10px 14px",
+  background: "#fff",
 };
 
 const sheetSelectStyle: CSSProperties = {
@@ -1813,16 +1832,18 @@ const sheetDropdownWrapStyle: CSSProperties = {
 
 const sheetDropdownTriggerStyle: CSSProperties = {
   width: "100%",
-  height: 38,
-  border: "1px solid #d1d5db",
-  borderRadius: 8,
+  minHeight: 44,
+  border: "1px solid #e7edf4",
+  borderRadius: 12,
   background: "#fff",
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  padding: "0 10px",
+  padding: "10px 14px",
   fontSize: 14,
   color: "#1f2937",
+  textAlign: "left",
+  cursor: "pointer",
 };
 
 const sheetDropdownChevronStyle: CSSProperties = {
@@ -1836,28 +1857,35 @@ const sheetDropdownChevronStyle: CSSProperties = {
 
 const sheetDropdownMenuStyle: CSSProperties = {
   position: "absolute",
-  top: 46,
+  top: 56,
   left: 8,
   right: 8,
-  border: "1px solid #d1d5db",
-  borderRadius: 10,
+  border: "1px solid #cbd5e1",
+  borderRadius: 14,
   background: "#fff",
-  boxShadow: "0 10px 24px rgba(15, 23, 42, 0.14)",
-  padding: 6,
+  boxShadow: "0 16px 30px rgba(15, 23, 42, 0.14)",
+  padding: 10,
   display: "grid",
-  gap: 4,
+  gap: 6,
   zIndex: 20,
 };
 
 const sheetDropdownOptionStyle: CSSProperties = {
-  border: "none",
-  borderRadius: 8,
-  background: "#fff",
+  border: "1px solid transparent",
+  borderRadius: 10,
+  background: "transparent",
   textAlign: "left",
-  padding: "8px 10px",
+  padding: "12px 14px",
   fontSize: 14,
   color: "#1f2937",
   cursor: "pointer",
+};
+
+const sheetDropdownOptionActiveStyle: CSSProperties = {
+  background: "#dbeafe",
+  color: "#1d4ed8",
+  fontWeight: 700,
+  borderColor: "#93c5fd",
 };
 
 const sheetMultiOptionItemStyle: CSSProperties = {

@@ -15,13 +15,18 @@ import {
   getStep3Policy,
   setProgress,
   setStep3Policy,
+  type Step1Data,
+  type Step2Data,
   type Step3Policy,
 } from "@/lib/prismMvp";
+import Step1PreviewPanel, { type Step3PreviewMetricId } from "../_components/Step1PreviewPanel";
 
 type Step3FieldKey = keyof Omit<Step3Policy, "reviewed">;
 type Step3CoreFieldKey = "automation_level_adjustment" | "auto_processing_scope" | "data_assetization_strategy";
 type InputMode = "table" | "form";
 type RowOrderPosition = "before" | "after";
+type SheetColIndex = 0 | 1 | 2;
+type SheetCell = { row: number; col: SheetColIndex };
 
 const STEP3_CORE_FIELDS: Array<{ key: Step3CoreFieldKey; label: string }> = [
   { key: "automation_level_adjustment", label: "자동 실행은 어느 수준까지 할까요" },
@@ -65,6 +70,8 @@ export default function PolicyPage() {
 
   const [locked, setLocked] = useState(true);
   const [policy, setPolicy] = useState<Step3Policy | null>(null);
+  const [step1Data, setStep1DataState] = useState<Step1Data | null>(null);
+  const [step2Data, setStep2DataState] = useState<Step2Data | null>(null);
   const [inputMode, setInputMode] = useState<InputMode>("table");
   const [storageNote, setStorageNote] = useState("");
   const [message, setMessage] = useState("");
@@ -73,10 +80,15 @@ export default function PolicyPage() {
   const [dropRowId, setDropRowId] = useState<Step3CoreFieldKey | null>(null);
   const [dropPosition, setDropPosition] = useState<RowOrderPosition>("after");
   const [openSelectRowId, setOpenSelectRowId] = useState<Step3CoreFieldKey | null>(null);
+  const [activeCell, setActiveCell] = useState<SheetCell | null>(null);
+  const [selectionRange, setSelectionRange] = useState<{ start: SheetCell; end: SheetCell } | null>(null);
+  const [isSelecting, setIsSelecting] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<"preview" | "impact">("preview");
   const [rightPanelWidth, setRightPanelWidth] = useState(420);
   const [isResizing, setIsResizing] = useState(false);
+  const [activeStep3MetricId, setActiveStep3MetricId] = useState<Step3PreviewMetricId | null>(null);
   const twoPaneRef = useRef<HTMLDivElement | null>(null);
+  const sheetRef = useRef<HTMLDivElement | null>(null);
   const activeSelectWrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -91,6 +103,8 @@ export default function PolicyPage() {
 
     const step1 = getStep1Data(id);
     const step2 = getStep2Data(id);
+    setStep1DataState(step1);
+    setStep2DataState(step2);
     const generated = generateStep3Policy(step1, step2);
     const existing = getStep3Policy(id);
 
@@ -166,6 +180,15 @@ export default function PolicyPage() {
   }, [isResizing]);
 
   useEffect(() => {
+    if (!isSelecting) return;
+    function onUp() {
+      setIsSelecting(false);
+    }
+    window.addEventListener("mouseup", onUp);
+    return () => window.removeEventListener("mouseup", onUp);
+  }, [isSelecting]);
+
+  useEffect(() => {
     if (!openSelectRowId) return;
     function onPointerDown(e: MouseEvent) {
       const target = e.target as Node | null;
@@ -223,6 +246,133 @@ export default function PolicyPage() {
       next.splice(insertAt, 0, dragId);
       return next;
     });
+  }
+
+  function toMetricId(key: Step3CoreFieldKey): Step3PreviewMetricId {
+    if (key === "automation_level_adjustment") return "execution_level";
+    if (key === "auto_processing_scope") return "approval_level";
+    return "data_policy";
+  }
+
+  function isEditableTarget(target: EventTarget | null) {
+    if (!(target instanceof HTMLElement)) return false;
+    return Boolean(target.closest("textarea, input, select, option, button, [data-editable='true']"));
+  }
+
+  function startCellSelection(row: number, col: SheetColIndex) {
+    const cell: SheetCell = { row, col };
+    setActiveCell(cell);
+    setSelectionRange({ start: cell, end: cell });
+    setIsSelecting(true);
+    setOpenSelectRowId(null);
+    sheetRef.current?.focus();
+  }
+
+  function extendCellSelection(row: number, col: SheetColIndex) {
+    if (!isSelecting || !selectionRange) return;
+    setSelectionRange((prev) => (prev ? { ...prev, end: { row, col } } : prev));
+  }
+
+  function isCellInSelection(row: number, col: SheetColIndex) {
+    if (!selectionRange) return activeCell?.row === row && activeCell?.col === col;
+    const rowMin = Math.min(selectionRange.start.row, selectionRange.end.row);
+    const rowMax = Math.max(selectionRange.start.row, selectionRange.end.row);
+    const colMin = Math.min(selectionRange.start.col, selectionRange.end.col);
+    const colMax = Math.max(selectionRange.start.col, selectionRange.end.col);
+    return row >= rowMin && row <= rowMax && col >= colMin && col <= colMax;
+  }
+
+  function getCellText(field: { key: Step3CoreFieldKey; label: string }, col: SheetColIndex) {
+    if (!policy) return "";
+    if (col === 0) return field.label;
+    if (col === 1) return policy[field.key] || "";
+    return STEP3_HELPER_TEXT[field.key];
+  }
+
+  function copySelectedCellsToText() {
+    if (!selectionRange && !activeCell) return null;
+    const rowMin = selectionRange ? Math.min(selectionRange.start.row, selectionRange.end.row) : (activeCell?.row ?? 0);
+    const rowMax = selectionRange ? Math.max(selectionRange.start.row, selectionRange.end.row) : (activeCell?.row ?? 0);
+    const colMin = selectionRange ? Math.min(selectionRange.start.col, selectionRange.end.col) : (activeCell?.col ?? 0);
+    const colMax = selectionRange ? Math.max(selectionRange.start.col, selectionRange.end.col) : (activeCell?.col ?? 0);
+
+    const lines: string[] = [];
+    for (let r = rowMin; r <= rowMax; r += 1) {
+      const field = orderedFields[r];
+      if (!field) continue;
+      const cols: string[] = [];
+      for (let c = colMin; c <= colMax; c += 1) {
+        cols.push(getCellText(field, c as SheetColIndex));
+      }
+      lines.push(cols.join("\t"));
+    }
+    return {
+      text: lines.join("\n"),
+      count: lines.length,
+    };
+  }
+
+  function handleSheetCopy(e: React.ClipboardEvent<HTMLDivElement>) {
+    if (inputMode !== "table") return;
+    if (isEditableTarget(e.target)) return;
+    const copied = copySelectedCellsToText();
+    if (!copied) return;
+    e.preventDefault();
+    e.clipboardData.setData("text/plain", copied.text);
+    setMessage(`값 ${copied.count}행 복사 완료`);
+  }
+
+  function applyPasteByCells(start: SheetCell, text: string) {
+    const lines = text
+      .split(/\r?\n/)
+      .map((line) => line.split("\t").map((c) => c.trim()))
+      .filter((cols) => cols.some((v) => v.length > 0));
+    if (lines.length === 0) return;
+
+    let updated = 0;
+    for (let r = 0; r < lines.length; r += 1) {
+      const rowIndex = start.row + r;
+      const field = orderedFields[rowIndex];
+      if (!field) break;
+      for (let c = 0; c < lines[r].length; c += 1) {
+        const colIndex = start.col + c;
+        if (colIndex !== 1) continue;
+        const raw = lines[r][c];
+        if (!raw) continue;
+        updateField(field.key, raw);
+        if (field.key === "data_assetization_strategy") {
+          const matched = STEP3_SELECT_OPTIONS.data_assetization_strategy.find((opt) => raw.startsWith(opt));
+          setStorageNote(matched ? raw.slice(matched.length).replace(/^\s*[-:]\s*/, "").trim() : "");
+        }
+        updated += 1;
+      }
+    }
+    setMessage(`붙여넣기 완료: ${updated}셀`);
+  }
+
+  function handleSheetPaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    if (inputMode !== "table") return;
+    if (isEditableTarget(e.target)) return;
+    if (!activeCell || locked) return;
+    e.preventDefault();
+    const text = e.clipboardData.getData("text/plain");
+    applyPasteByCells(activeCell, text);
+  }
+
+  function handleSheetKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (inputMode !== "table") return;
+    const target = e.target as HTMLElement;
+    const tag = target.tagName.toLowerCase();
+    if (tag === "textarea" || tag === "input" || tag === "select") return;
+    const cmd = e.metaKey || e.ctrlKey;
+    if (!cmd) return;
+    if (e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      if (orderedFields.length === 0) return;
+      setActiveCell({ row: 0, col: 0 });
+      setSelectionRange({ start: { row: 0, col: 0 }, end: { row: orderedFields.length - 1, col: 2 } });
+      setMessage("표 전체 셀 선택");
+    }
   }
 
   function handleSave() {
@@ -303,13 +453,20 @@ export default function PolicyPage() {
         </div>
 
         {policy && inputMode === "table" && (
-          <div style={sheetWrapStyle}>
+          <div
+            ref={sheetRef}
+            tabIndex={0}
+            onKeyDown={handleSheetKeyDown}
+            onCopy={handleSheetCopy}
+            onPaste={handleSheetPaste}
+            style={sheetWrapStyle}
+          >
             <div style={sheetHeaderRowStyle}>
               <div style={sheetHeadFieldStyle}>Field</div>
               <div style={sheetHeadValueStyle}>Value</div>
               <div style={sheetHeadNoteStyle}>Note</div>
             </div>
-            {orderedFields.map((field) => (
+            {orderedFields.map((field, rowIndex) => (
               <div
                 key={field.key}
                 style={{
@@ -334,11 +491,26 @@ export default function PolicyPage() {
                 }}
                 onDragLeave={() => setDropRowId(null)}
               >
-                <div style={sheetFieldCellStyle}>
+                <div
+                  style={{
+                    ...sheetFieldCellStyle,
+                    background: isCellInSelection(rowIndex, 0) ? "#eaf2ff" : undefined,
+                    boxShadow: activeCell?.row === rowIndex && activeCell.col === 0 ? "inset 0 0 0 1px #93c5fd" : undefined,
+                    cursor: "cell",
+                  }}
+                  onMouseDown={(e) => {
+                    if (isEditableTarget(e.target)) return;
+                    e.preventDefault();
+                    setActiveStep3MetricId(toMetricId(field.key));
+                    startCellSelection(rowIndex, 0);
+                  }}
+                  onMouseEnter={() => extendCellSelection(rowIndex, 0)}
+                >
                   <button
                     type="button"
                     draggable
                     style={rowDragHandleStyle}
+                    onMouseDown={(e) => e.stopPropagation()}
                     onDragStart={(e) => {
                       e.dataTransfer.effectAllowed = "move";
                       e.dataTransfer.setData("text/plain", field.key);
@@ -354,7 +526,20 @@ export default function PolicyPage() {
                   </button>
                   <span>{field.label}</span>
                 </div>
-                <div style={sheetValueCellStyle}>
+                <div
+                  style={{
+                    ...sheetValueCellStyle,
+                    background: isCellInSelection(rowIndex, 1) ? "#eaf2ff" : undefined,
+                    boxShadow: activeCell?.row === rowIndex && activeCell.col === 1 ? "inset 0 0 0 1px #93c5fd" : undefined,
+                  }}
+                  onMouseDown={(e) => {
+                    if (isEditableTarget(e.target)) return;
+                    e.preventDefault();
+                    setActiveStep3MetricId(toMetricId(field.key));
+                    startCellSelection(rowIndex, 1);
+                  }}
+                  onMouseEnter={() => extendCellSelection(rowIndex, 1)}
+                >
                   <div style={sheetValueInnerStyle}>
                     <div
                       ref={openSelectRowId === field.key ? activeSelectWrapRef : null}
@@ -364,16 +549,18 @@ export default function PolicyPage() {
                         type="button"
                         onClick={() => {
                           if (locked) return;
+                          setActiveStep3MetricId(toMetricId(field.key));
                           setOpenSelectRowId((prev) => (prev === field.key ? null : field.key));
                         }}
                         disabled={locked}
+                        data-editable="true"
                         style={sheetSelectTriggerStyle}
                       >
                         <span>{getSelectedOption(field.key, policy[field.key]) || "선택"}</span>
                         <span style={sheetSelectChevronStyle}>{openSelectRowId === field.key ? "▴" : "▾"}</span>
                       </button>
                       {!locked && openSelectRowId === field.key && (
-                        <div style={sheetSelectMenuStyle}>
+                        <div data-editable="true" style={sheetSelectMenuStyle}>
                           {STEP3_SELECT_OPTIONS[field.key].map((option) => {
                             const selected = getSelectedOption(field.key, policy[field.key]) === option;
                             return (
@@ -384,6 +571,7 @@ export default function PolicyPage() {
                                   updateCoreSelectField(field.key, option);
                                   setOpenSelectRowId(null);
                                 }}
+                                data-editable="true"
                                 style={{
                                   ...sheetSelectOptionStyle,
                                   ...(selected ? sheetSelectOptionActiveStyle : {}),
@@ -400,14 +588,30 @@ export default function PolicyPage() {
                       <textarea
                         value={storageNote}
                         onChange={(e) => updateStorageNote(e.target.value)}
+                        onFocus={() => setActiveStep3MetricId("data_policy")}
                         disabled={locked}
+                        data-editable="true"
                         style={sheetValueInputStyle}
                         placeholder="추가 기준을 텍스트로 입력하세요."
                       />
                     )}
                   </div>
                 </div>
-                <div style={sheetNoteCellStyle}>
+                <div
+                  style={{
+                    ...sheetNoteCellStyle,
+                    background: isCellInSelection(rowIndex, 2) ? "#eaf2ff" : undefined,
+                    boxShadow: activeCell?.row === rowIndex && activeCell.col === 2 ? "inset 0 0 0 1px #93c5fd" : undefined,
+                    cursor: "cell",
+                  }}
+                  onMouseDown={(e) => {
+                    if (isEditableTarget(e.target)) return;
+                    e.preventDefault();
+                    setActiveStep3MetricId(toMetricId(field.key));
+                    startCellSelection(rowIndex, 2);
+                  }}
+                  onMouseEnter={() => extendCellSelection(rowIndex, 2)}
+                >
                   <div style={sheetNoteTextStyle}>{STEP3_HELPER_TEXT[field.key]}</div>
                 </div>
               </div>
@@ -430,6 +634,7 @@ export default function PolicyPage() {
                   ...(dropRowId === field.key && dropPosition === "before" ? { borderTop: "2px solid #3b82f6" } : {}),
                   ...(dropRowId === field.key && dropPosition === "after" ? { borderBottom: "2px solid #3b82f6" } : {}),
                 }}
+                onMouseDown={() => setActiveStep3MetricId(toMetricId(field.key))}
                 onDragOver={(e) => {
                   e.preventDefault();
                   const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
@@ -490,6 +695,7 @@ export default function PolicyPage() {
                       <textarea
                         value={storageNote}
                         onChange={(e) => updateStorageNote(e.target.value)}
+                        onFocus={() => setActiveStep3MetricId("data_policy")}
                         disabled={locked}
                         style={sheetValueInputStyle}
                         placeholder="추가 기준을 텍스트로 입력하세요."
@@ -553,6 +759,28 @@ export default function PolicyPage() {
         {rightPanelTab === "preview" && (
           <>
             <p style={{ ...subtleStyle, marginTop: 8 }}>GUIDED 모드에서는 STEP1 확정 후 STEP2/3/4 탭에 접근할 수 있습니다.</p>
+            {step1Data && step2Data && (
+              <Step1PreviewPanel
+                data={step1Data}
+                step2Data={step2Data}
+                step3PolicyMetrics={
+                  policy
+                    ? {
+                        executionLevel: policy.automation_level_adjustment,
+                        approvalLevel: policy.auto_processing_scope,
+                        dataPolicy: policy.data_assetization_strategy,
+                      }
+                    : null
+                }
+                mode="step2"
+                flowSectionTitle="STEP 1 & 2 처리 플로우"
+                showExecutionSection={false}
+                showFlowSourceTags
+                flowSourceTagTone="neutral"
+                flowSourceTagLabelMode="summary"
+                activeStep3MetricId={activeStep3MetricId}
+              />
+            )}
             {!locked && missing.length > 0 && (
               <div style={{ marginTop: 10, border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, background: "#f8fafc" }}>
                 <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>누락 항목</div>
@@ -671,8 +899,10 @@ const sheetWrapStyle: CSSProperties = {
   marginTop: 12,
   border: "1px solid #cbd5e1",
   borderRadius: 10,
-  overflow: "hidden",
+  overflow: "visible",
   background: "#fff",
+  position: "relative",
+  zIndex: 1,
 };
 
 const sheetHeaderRowStyle: CSSProperties = {
@@ -741,7 +971,7 @@ const sheetSelectWrapStyle: CSSProperties = {
 const sheetSelectTriggerStyle: CSSProperties = {
   width: "100%",
   minHeight: 44,
-  border: "1px solid #cbd5e1",
+  border: "1px solid #e7edf4",
   borderRadius: 12,
   background: "#ffffff",
   color: "#1f2937",
@@ -776,7 +1006,7 @@ const sheetSelectMenuStyle: CSSProperties = {
 };
 
 const sheetSelectOptionStyle: CSSProperties = {
-  border: "none",
+  border: "1px solid transparent",
   background: "transparent",
   borderRadius: 10,
   padding: "12px 14px",
@@ -790,6 +1020,7 @@ const sheetSelectOptionActiveStyle: CSSProperties = {
   background: "#dbeafe",
   color: "#1d4ed8",
   fontWeight: 700,
+  borderColor: "#93c5fd",
 };
 
 const sheetChoiceItemStyle: CSSProperties = {
@@ -853,8 +1084,10 @@ const formSheetWrapStyle: CSSProperties = {
   marginTop: 12,
   border: "1px solid #cbd5e1",
   borderRadius: 10,
-  overflow: "hidden",
+  overflow: "visible",
   background: "#fff",
+  position: "relative",
+  zIndex: 1,
 };
 
 const formSheetHeaderRowStyle: CSSProperties = {

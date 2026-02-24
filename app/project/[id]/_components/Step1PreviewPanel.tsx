@@ -18,6 +18,20 @@ import {
 } from "@/lib/prismMvp";
 
 export type Step1PreviewAreaKey = "strategy" | "policy" | "automation" | "state_flow" | "risk_profile";
+export type Step2PreviewFieldId = "user_flow" | "ai_intervention" | "human_control" | "system_process";
+export type Step3PreviewMetricId = "execution_level" | "approval_level" | "data_policy";
+export type Step1PreviewRowId =
+  | "why"
+  | "target"
+  | "as_is"
+  | "result_state"
+  | "ai_task_types"
+  | "no_ai_alternative"
+  | "exposure"
+  | "reversibility"
+  | "impact"
+  | "hitl"
+  | "kpi";
 
 type BadgeMeta = { bg: string; fg: string; border: string; label: string };
 
@@ -26,7 +40,14 @@ export const STEP1_PREVIEW_BADGES: Record<Step1PreviewAreaKey, BadgeMeta> = {
   policy: { label: "통제 포인트", bg: "#dcfce7", fg: "#166534", border: "#86efac" },
   automation: { label: "실행 방식", bg: "#f3e8ff", fg: "#6b21a8", border: "#d8b4fe" },
   state_flow: { label: "상태 모델", bg: "#fef3c7", fg: "#92400e", border: "#fcd34d" },
-  risk_profile: { label: "리스크 영향", bg: "#fee2e2", fg: "#991b1b", border: "#fca5a5" },
+  risk_profile: { label: "기능 리스크", bg: "#fee2e2", fg: "#991b1b", border: "#fca5a5" },
+};
+
+const STEP3_POLICY_METRICS_BADGE: BadgeMeta = {
+  label: "정책 검증 지표",
+  bg: "#f1f5f9",
+  fg: "#334155",
+  border: "#cbd5e1",
 };
 
 const TARGET_LABEL_BY_VALUE: Record<Step1Target, string> = {
@@ -92,6 +113,9 @@ function areSourceTagsEqual(a: Step2FlowSourceTag[], b: Step2FlowSourceTag[]): b
 }
 
 function formatSourceTagLabel(tag: Step2FlowSourceTag, mode: "step1" | "step2"): string {
+  if (mode === "step2" && (tag.key === "step2_user_flow" || tag.key === "step2_ai_intervention" || tag.key === "step2_human_control" || tag.key === "step2_system_process")) {
+    return "Step2 수기 변경";
+  }
   if (tag.key === "step1" || tag.key === "ai_task_types" || tag.key === "hitl" || tag.key === "result_state" || tag.key === "final_executor" || tag.key === "exposure") {
     return mode === "step2" ? `Step1 ${tag.label}` : tag.label;
   }
@@ -102,10 +126,16 @@ function FlowStepList({
   steps,
   changedStepIds,
   mode,
+  showSourceTags = true,
+  sourceTagTone = "blue",
+  sourceTagLabelMode = "detailed",
 }: {
   steps: Step2FlowStep[];
   changedStepIds?: Set<string>;
   mode: "step1" | "step2";
+  showSourceTags?: boolean;
+  sourceTagTone?: "blue" | "neutral";
+  sourceTagLabelMode?: "detailed" | "summary";
 }) {
   if (steps.length === 0) {
     return <div style={previewFlowStyle}>흐름 정보 없음</div>;
@@ -115,6 +145,17 @@ function FlowStepList({
     <div style={previewFlowListStyle}>
       {steps.map((step, index) => {
         const changed = changedStepIds?.has(step.id) ?? false;
+        const summaryLabels =
+          sourceTagLabelMode === "summary"
+            ? step.source_tags.length === 0
+              ? ["Step2 수기 변경"]
+              : ["Step1 자동 생성"]
+            : [];
+        const detailedLabels =
+          sourceTagLabelMode === "summary"
+            ? []
+            : Array.from(new Set(step.source_tags.map((tag) => formatSourceTagLabel(tag, mode))));
+        const sourceLabels = sourceTagLabelMode === "summary" ? summaryLabels : detailedLabels;
         return (
           <div
             key={step.id}
@@ -127,11 +168,14 @@ function FlowStepList({
               <span style={previewFlowIndexStyle}>{index + 1}</span>
               <span style={previewFlowLabelStyle}>{step.label}</span>
             </div>
-            {step.source_tags.length > 0 && (
+            {showSourceTags && sourceLabels.length > 0 && (
               <div style={previewTagWrapStyle}>
-                {step.source_tags.map((tag) => (
-                  <span key={`${step.id}-${tag.key}-${tag.label}`} style={previewSourceTagStyle}>
-                    {formatSourceTagLabel(tag, mode)}
+                {sourceLabels.map((label) => (
+                  <span
+                    key={`${step.id}-${label}`}
+                    style={sourceTagTone === "neutral" ? previewSourceTagStyleNeutral : previewSourceTagStyle}
+                  >
+                    {label}
                   </span>
                 ))}
               </div>
@@ -146,23 +190,54 @@ function FlowStepList({
 export default function Step1PreviewPanel({
   data,
   step2Data,
+  step3PolicyMetrics,
+  flowBaselineUserFlow,
   mode = "step1",
+  flowSectionTitle,
+  showExecutionSection = true,
+  showFlowSourceTags = true,
+  flowSourceTagTone = "blue",
+  flowSourceTagLabelMode = "detailed",
+  activeRowId,
+  activeStep2FieldId,
+  activeStep3MetricId,
   activeArea,
   onAreaClick,
 }: {
   data: Step1Data;
   step2Data?: Step2Data | null;
+  step3PolicyMetrics?: {
+    executionLevel: string;
+    approvalLevel: string;
+    dataPolicy: string;
+  } | null;
+  flowBaselineUserFlow?: string;
   mode?: "step1" | "step2";
+  flowSectionTitle?: string;
+  showExecutionSection?: boolean;
+  showFlowSourceTags?: boolean;
+  flowSourceTagTone?: "blue" | "neutral";
+  flowSourceTagLabelMode?: "detailed" | "summary";
+  activeRowId?: Step1PreviewRowId | null;
+  activeStep2FieldId?: Step2PreviewFieldId | null;
+  activeStep3MetricId?: Step3PreviewMetricId | null;
   activeArea?: Step1PreviewAreaKey | null;
   onAreaClick?: (area: Step1PreviewAreaKey) => void;
 }) {
   const flowPreview = useMemo(() => buildStep2FlowPreview(data, step2Data ?? undefined), [data, step2Data]);
-  const generatedPreview = useMemo(() => buildStep2FlowPreview(data), [data]);
+  const flowBaselinePreview = useMemo(() => {
+    if (mode !== "step2" || !step2Data) return null;
+    const baselineStep2: Step2Data = {
+      ...step2Data,
+      user_flow: flowBaselineUserFlow ?? step2Data.user_flow,
+    };
+    return buildStep2FlowPreview(data, baselineStep2);
+  }, [data, flowBaselineUserFlow, mode, step2Data]);
   const changedStepIds = useMemo(() => {
-    if (mode !== "step2") return new Set<string>();
+    if (mode !== "step2" || !flowBaselinePreview) return new Set<string>();
     const changed = new Set<string>();
     const current = flowPreview.flow_steps;
-    const previous = generatedPreview.flow_steps;
+    const previous = flowBaselinePreview.flow_steps;
     for (let index = 0; index < current.length; index += 1) {
       const currentStep = current[index];
       const previousStep = previous[index];
@@ -175,7 +250,24 @@ export default function Step1PreviewPanel({
       }
     }
     return changed;
-  }, [flowPreview.flow_steps, generatedPreview.flow_steps, mode]);
+  }, [flowBaselinePreview, flowPreview.flow_steps, mode]);
+  const focusedPreviewKeys = useMemo(() => {
+    const keys = new Set<string>();
+    if (mode !== "step1" || !activeRowId) return keys;
+    if (activeRowId === "why") keys.add("purpose");
+    if (activeRowId === "target") keys.add("target");
+    if (activeRowId === "result_state") keys.add("result_state");
+    if (activeRowId === "kpi") keys.add("kpi");
+    if (activeRowId === "ai_task_types") keys.add("ai_role");
+    if (activeRowId === "exposure") keys.add("risk_exposure");
+    if (activeRowId === "reversibility") keys.add("risk_reversibility");
+    if (activeRowId === "impact") keys.add("risk_impact");
+    if (activeRowId === "hitl") {
+      keys.add("human_review");
+      keys.add("risk_hitl");
+    }
+    return keys;
+  }, [activeRowId, mode]);
 
   const aiRoleSummary =
     data.ai_task_types.length > 0
@@ -211,13 +303,6 @@ export default function Step1PreviewPanel({
   const impactSummary = data.impact ? `${IMPACT_LABEL[data.impact]} (impact=${data.impact})` : "미선택 (UNSET)";
   const hitlSummary = data.hitl ? `${HITL_LABEL[data.hitl]} (hitl=${data.hitl})` : "미선택 (UNSET)";
 
-  const impactAnchor = data.impact ? `${IMPACT_LABEL[data.impact]} (impact=${data.impact})` : "실패 비용 위치 입력 필요";
-  const riskSignals = [
-    data.exposure ? `${EXPOSURE_LABEL[data.exposure]} (exposure=${data.exposure})` : "",
-    data.hitl ? `${HITL_LABEL[data.hitl]} (hitl=${data.hitl})` : "",
-    data.reversibility ? `${REVERSIBILITY_LABEL[data.reversibility]} (reversibility=${data.reversibility})` : "",
-  ].filter(Boolean);
-
   if (mode === "step2") {
     return (
       <div style={previewFrameStyle}>
@@ -233,74 +318,106 @@ export default function Step1PreviewPanel({
           <PreviewItem label="성공 가설 (KPI Hypothesis)" value={kpiSummary} />
         </PreviewSection>
 
+        {step3PolicyMetrics && (
+          <PreviewSection
+            title="정책 검증 지표"
+            badge={STEP3_POLICY_METRICS_BADGE}
+            active={Boolean(activeStep3MetricId)}
+          >
+            <PreviewItem
+              label="실행 수준 (Execution Level)"
+              value={step3PolicyMetrics.executionLevel || "미선택 (UNSET)"}
+              highlighted={activeStep3MetricId === "execution_level"}
+            />
+            <PreviewItem
+              label="승인 수준 (Approval Level)"
+              value={step3PolicyMetrics.approvalLevel || "미선택 (UNSET)"}
+              highlighted={activeStep3MetricId === "approval_level"}
+            />
+            <PreviewItem
+              label="데이터 정책 (Data Policy)"
+              value={step3PolicyMetrics.dataPolicy || "미선택 (UNSET)"}
+              highlighted={activeStep3MetricId === "data_policy"}
+            />
+          </PreviewSection>
+        )}
+
         <PreviewSection
-          title="처리 플로우"
+          title={flowSectionTitle ?? "처리 플로우"}
           badge={STEP1_PREVIEW_BADGES.state_flow}
           active={activeArea === "state_flow"}
           onClick={onAreaClick ? () => onAreaClick("state_flow") : undefined}
         >
-          <FlowStepList steps={flowPreview.flow_steps} changedStepIds={changedStepIds} mode={mode} />
+          <div style={activeStep2FieldId === "user_flow" ? previewSlotHighlightedStyle : undefined}>
+            <FlowStepList
+              steps={flowPreview.flow_steps}
+              changedStepIds={changedStepIds}
+              mode={mode}
+              showSourceTags={showFlowSourceTags}
+              sourceTagTone={flowSourceTagTone}
+              sourceTagLabelMode={flowSourceTagLabelMode}
+            />
+          </div>
         </PreviewSection>
 
         <PreviewSection
-          title="Step2 통제 포인트"
-          badge={STEP1_PREVIEW_BADGES.policy}
+          title="Step1 기능 리스크"
+          badge={STEP1_PREVIEW_BADGES.risk_profile}
           active={activeArea === "policy"}
           onClick={onAreaClick ? () => onAreaClick("policy") : undefined}
         >
+          <PreviewItem label="주요 영향 (Impact)" value={impactSummary} />
           <PreviewItem label="노출 범위 (Exposure)" value={exposureSummary} />
           <PreviewItem label="되돌림 가능성 (Reversibility)" value={reversibilitySummary} />
-          <PreviewItem label="실패 비용 위치 (Impact)" value={impactSummary} />
-          <PreviewItem label="인간 개입 시점 (HITL)" value={hitlSummary} />
+          <PreviewItem label="사람 개입 지점 (HITL)" value={hitlSummary} />
         </PreviewSection>
 
-        <PreviewSection
-          title="Step2 실행 레이어"
-          badge={STEP1_PREVIEW_BADGES.automation}
-          active={activeArea === "automation"}
-          onClick={onAreaClick ? () => onAreaClick("automation") : undefined}
-        >
-          <PreviewItem label="AI 실행 방식 (AI Intervention)" value={flowPreview.ai_intervention.value || "미입력"} />
-          <div style={previewTagWrapStyle}>
-            {flowPreview.ai_intervention.source_tags.map((tag) => (
-              <span key={`ai-${tag.key}-${tag.label}`} style={previewSourceTagStyle}>
-                {formatSourceTagLabel(tag, mode)}
-              </span>
-            ))}
-          </div>
-          <PreviewItem label="사람 개입 방식 (Human Control)" value={flowPreview.human_control.value || "미입력"} />
-          <div style={previewTagWrapStyle}>
-            {flowPreview.human_control.source_tags.map((tag) => (
-              <span key={`human-${tag.key}-${tag.label}`} style={previewSourceTagStyle}>
-                {formatSourceTagLabel(tag, mode)}
-              </span>
-            ))}
-          </div>
-          <PreviewItem label="시스템 처리 구조 (System Process)" value={flowPreview.system_process.value || "미입력"} />
-          <div style={previewTagWrapStyle}>
-            {flowPreview.system_process.source_tags.map((tag) => (
-              <span key={`sys-${tag.key}-${tag.label}`} style={previewSourceTagStyle}>
-                {formatSourceTagLabel(tag, mode)}
-              </span>
-            ))}
-          </div>
-        </PreviewSection>
-
-        <PreviewSection
-          title="Step1 리스크 영향"
-          badge={STEP1_PREVIEW_BADGES.risk_profile}
-          active={activeArea === "risk_profile"}
-          onClick={onAreaClick ? () => onAreaClick("risk_profile") : undefined}
-          isLast
-        >
-          <PreviewItem label="기준 항목 (Primary Anchor)" value={impactAnchor} />
-          <div style={previewReasonStyle}>참고 신호 (Context Signals)</div>
-          <ul style={previewReasonListStyle}>
-            {riskSignals.map((riskSignal) => (
-              <li key={riskSignal}>- {riskSignal}</li>
-            ))}
-          </ul>
-        </PreviewSection>
+        {showExecutionSection && (
+          <PreviewSection
+            title="실행 방식"
+            badge={STEP1_PREVIEW_BADGES.automation}
+            active={activeArea === "automation"}
+            onClick={onAreaClick ? () => onAreaClick("automation") : undefined}
+            isLast
+          >
+            <PreviewItem
+              label="AI 실행 방식 (AI Intervention)"
+              value={flowPreview.ai_intervention.value || "미입력"}
+              highlighted={activeStep2FieldId === "ai_intervention"}
+            />
+            <div style={previewTagWrapStyle}>
+              {flowPreview.ai_intervention.source_tags.map((tag) => (
+                <span key={`ai-${tag.key}-${tag.label}`} style={previewSourceTagStyle}>
+                  {formatSourceTagLabel(tag, mode)}
+                </span>
+              ))}
+            </div>
+            <PreviewItem
+              label="사람 개입 방식 (Human Control)"
+              value={flowPreview.human_control.value || "미입력"}
+              highlighted={activeStep2FieldId === "human_control"}
+            />
+            <div style={previewTagWrapStyle}>
+              {flowPreview.human_control.source_tags.map((tag) => (
+                <span key={`human-${tag.key}-${tag.label}`} style={previewSourceTagStyle}>
+                  {formatSourceTagLabel(tag, mode)}
+                </span>
+              ))}
+            </div>
+            <PreviewItem
+              label="시스템 처리 구조 (System Process)"
+              value={flowPreview.system_process.value || "미입력"}
+              highlighted={activeStep2FieldId === "system_process"}
+            />
+            <div style={previewTagWrapStyle}>
+              {flowPreview.system_process.source_tags.map((tag) => (
+                <span key={`sys-${tag.key}-${tag.label}`} style={previewSourceTagStyle}>
+                  {formatSourceTagLabel(tag, mode)}
+                </span>
+              ))}
+            </div>
+          </PreviewSection>
+        )}
       </div>
     );
   }
@@ -313,10 +430,10 @@ export default function Step1PreviewPanel({
         active={activeArea === "strategy"}
         onClick={onAreaClick ? () => onAreaClick("strategy") : undefined}
       >
-        <PreviewItem label="목적 (Purpose)" value={data.why.trim() || "미입력"} />
-        <PreviewItem label="대상 사용자 (Target)" value={targetSummary} />
-        <PreviewItem label="결과 상태 (Result State)" value={resultStateSummary} />
-        <PreviewItem label="성공 가설 (KPI Hypothesis)" value={kpiSummary} />
+        <PreviewItem label="목적 (Purpose)" value={data.why.trim() || "미입력"} highlighted={focusedPreviewKeys.has("purpose")} />
+        <PreviewItem label="대상 사용자 (Target)" value={targetSummary} highlighted={focusedPreviewKeys.has("target")} />
+        <PreviewItem label="결과 상태 (Result State)" value={resultStateSummary} highlighted={focusedPreviewKeys.has("result_state")} />
+        <PreviewItem label="성공 가설 (KPI Hypothesis)" value={kpiSummary} highlighted={focusedPreviewKeys.has("kpi")} />
       </PreviewSection>
 
       <PreviewSection
@@ -325,8 +442,8 @@ export default function Step1PreviewPanel({
         active={activeArea === "automation"}
         onClick={onAreaClick ? () => onAreaClick("automation") : undefined}
       >
-        <PreviewItem label="AI 역할 (AI Role)" value={aiRoleSummary} />
-        <PreviewItem label="사람 개입 시점 (Human Review Model)" value={humanReviewSummary} />
+        <PreviewItem label="AI 역할 (AI Role)" value={aiRoleSummary} highlighted={focusedPreviewKeys.has("ai_role")} />
+        <PreviewItem label="사람 개입 지점 (HITL)" value={humanReviewSummary} highlighted={focusedPreviewKeys.has("human_review")} />
         <PreviewItem label="게시/적용 방식 (Execution Authority)" value={executionAuthoritySummary} />
         <PreviewItem label="자동 처리 허용 여부 (Conditional Delegation)" value={`${conditionalDelegationSummary}\n${signal}`} />
       </PreviewSection>
@@ -342,31 +459,16 @@ export default function Step1PreviewPanel({
       </PreviewSection>
 
       <PreviewSection
-        title="통제 포인트"
-        badge={STEP1_PREVIEW_BADGES.policy}
-        active={activeArea === "policy"}
-        onClick={onAreaClick ? () => onAreaClick("policy") : undefined}
-      >
-        <PreviewItem label="노출 범위 (Exposure)" value={exposureSummary} />
-        <PreviewItem label="되돌림 가능성 (Reversibility)" value={reversibilitySummary} />
-        <PreviewItem label="실패 비용 위치 (Impact)" value={impactSummary} />
-        <PreviewItem label="인간 개입 시점 (HITL)" value={hitlSummary} />
-      </PreviewSection>
-
-      <PreviewSection
-        title="리스크 영향"
+        title="기능 리스크"
         badge={STEP1_PREVIEW_BADGES.risk_profile}
         active={activeArea === "risk_profile"}
         onClick={onAreaClick ? () => onAreaClick("risk_profile") : undefined}
         isLast
       >
-        <PreviewItem label="기준 항목 (Primary Anchor)" value={impactAnchor} />
-        <div style={previewReasonStyle}>참고 신호 (Context Signals)</div>
-        <ul style={previewReasonListStyle}>
-          {riskSignals.map((riskSignal) => (
-            <li key={riskSignal}>- {riskSignal}</li>
-          ))}
-        </ul>
+        <PreviewItem label="주요 영향 (Impact)" value={impactSummary} highlighted={focusedPreviewKeys.has("risk_impact")} />
+        <PreviewItem label="노출 범위 (Exposure)" value={exposureSummary} highlighted={focusedPreviewKeys.has("risk_exposure")} />
+        <PreviewItem label="되돌림 가능성 (Reversibility)" value={reversibilitySummary} highlighted={focusedPreviewKeys.has("risk_reversibility")} />
+        <PreviewItem label="사람 개입 지점 (HITL)" value={hitlSummary} highlighted={focusedPreviewKeys.has("risk_hitl")} />
       </PreviewSection>
     </div>
   );
@@ -410,9 +512,9 @@ function PreviewSection({
   );
 }
 
-function PreviewItem({ label, value }: { label: string; value: string }) {
+function PreviewItem({ label, value, highlighted = false }: { label: string; value: string; highlighted?: boolean }) {
   return (
-    <div style={previewItemStyle}>
+    <div style={{ ...previewItemStyle, ...(highlighted ? previewItemHighlightedStyle : {}) }}>
       <div style={previewItemLabelStyle}>{label}</div>
       <div style={previewItemValueStyle}>{value}</div>
     </div>
@@ -460,6 +562,13 @@ const previewItemStyle: CSSProperties = {
   gap: 2,
 };
 
+const previewItemHighlightedStyle: CSSProperties = {
+  background: "#eaf2ff",
+  border: "1px solid #93c5fd",
+  borderRadius: 8,
+  padding: "6px 8px",
+};
+
 const previewItemLabelStyle: CSSProperties = {
   fontSize: 12,
   color: "#6b7280",
@@ -488,6 +597,13 @@ const previewFlowListStyle: CSSProperties = {
   gap: 6,
 };
 
+const previewSlotHighlightedStyle: CSSProperties = {
+  background: "#eaf2ff",
+  border: "1px solid #93c5fd",
+  borderRadius: 10,
+  padding: 6,
+};
+
 const previewFlowItemStyle: CSSProperties = {
   border: "1px solid #d1d5db",
   borderRadius: 8,
@@ -497,7 +613,7 @@ const previewFlowItemStyle: CSSProperties = {
 
 const previewFlowItemChangedStyle: CSSProperties = {
   background: "#eff6ff",
-  borderColor: "#60a5fa",
+  border: "1px solid #60a5fa",
   boxShadow: "inset 0 0 0 1px #93c5fd",
 };
 
@@ -545,18 +661,14 @@ const previewSourceTagStyle: CSSProperties = {
   padding: "2px 8px",
 };
 
-const previewReasonStyle: CSSProperties = {
-  fontSize: 12,
-  fontWeight: 700,
-  color: "#6b7280",
-};
-
-const previewReasonListStyle: CSSProperties = {
-  margin: 0,
-  padding: 0,
-  listStyle: "none",
-  display: "grid",
-  gap: 2,
-  fontSize: 12,
-  color: "#374151",
+const previewSourceTagStyleNeutral: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  border: "1px solid #d1d5db",
+  background: "#f8fafc",
+  color: "#475569",
+  borderRadius: 999,
+  fontSize: 11,
+  fontWeight: 600,
+  padding: "2px 8px",
 };

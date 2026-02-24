@@ -2328,6 +2328,12 @@ export default function TechSpecPage() {
     setMessage("STEP4 저장 완료");
   }
 
+  function handleConfirm() {
+    if (!id || locked) return;
+    handleSave();
+    setMessage("STEP4 확정 완료");
+  }
+
   const specMap = useMemo(() => {
     const m = new Map<string, string>();
     for (const row of deferredRows) m.set(row.rowId, row.spec);
@@ -2743,9 +2749,14 @@ export default function TechSpecPage() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <h1 style={titleStyle}>STEP 4 기술 명세</h1>
           {!locked && (
-            <button style={saveButtonStyle} onClick={handleSave}>
-              저장
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button style={saveButtonStyle} onClick={handleSave}>
+                저장
+              </button>
+              <button style={saveButtonStyle} onClick={handleConfirm}>
+                POC 돌리기
+              </button>
+            </div>
           )}
         </div>
         <div style={policyMeaningStyle}>
