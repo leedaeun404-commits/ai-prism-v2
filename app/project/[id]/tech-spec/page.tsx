@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   addHistoryEvent,
+  canAccessTechSpec,
   generateTechSpecRows,
   getStep4Rows,
   HISTORY_EVENT_TYPES,
@@ -2257,10 +2258,10 @@ export default function TechSpecPage() {
   useEffect(() => {
     if (!id) return;
     const progress = getProgress(id);
-    const canAccess = progress.step1Frozen;
+    const canAccess = canAccessTechSpec(progress);
     setLocked(!canAccess);
     if (!canAccess) {
-      router.replace(`/project/${id}/screening`);
+      router.replace(`/project/${id}/policy`);
       return;
     }
 
@@ -2274,6 +2275,7 @@ export default function TechSpecPage() {
       setRows(generatedRows);
       setStep4Rows(id, generatedRows);
       setSelectedRowId(generatedRows[0]?.rowId ?? null);
+      setMessage("STEP1~3 확정 기준으로 STEP4 초안을 자동 생성했습니다.");
     } else {
       const savedMap = new Map(savedRows.map((r) => [r.rowId, r]));
       const merged = generatedRows.map((row) => {

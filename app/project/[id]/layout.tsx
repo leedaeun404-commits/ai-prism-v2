@@ -62,7 +62,7 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
       {
         href: `/project/${id}/tech-spec`,
         label: "STEP 4 기술 명세",
-        locked: !progress.step1Frozen,
+        locked: !progress.step1Frozen || !progress.step2Completed || !progress.step3Completed,
       },
     ],
     [id, progress]
