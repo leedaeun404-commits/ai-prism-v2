@@ -2237,6 +2237,7 @@ export default function TechSpecPage() {
 
   const [locked, setLocked] = useState(true);
   const [rows, setRows] = useState<Step4Row[]>([]);
+  const [savedRowsSnapshot, setSavedRowsSnapshot] = useState<Step4Row[] | null>(null);
   const [step1TaskTypes, setStep1TaskTypes] = useState<Step1AiTaskType[]>([]);
   const [inputMode, setInputMode] = useState<InputMode>("table");
   const [message, setMessage] = useState("");
@@ -2291,6 +2292,7 @@ export default function TechSpecPage() {
     if (savedRows.length === 0) {
       setRows(generatedRows);
       setStep4Rows(id, generatedRows);
+      setSavedRowsSnapshot(generatedRows);
       setSelectedRowId(generatedRows[0]?.rowId ?? null);
       setMessage("STEP1~3 확정 기준으로 STEP4 초안을 자동 생성했습니다.");
     } else {
@@ -2308,9 +2310,24 @@ export default function TechSpecPage() {
       });
       setRows(merged);
       setStep4Rows(id, merged);
+      setSavedRowsSnapshot(merged);
       setSelectedRowId((prev) => prev ?? merged[0]?.rowId ?? null);
     }
   }, [id, router]);
+
+  const hasUnsavedChanges = useMemo(() => {
+    if (!savedRowsSnapshot) return false;
+    if (rows.length !== savedRowsSnapshot.length) return true;
+    for (let i = 0; i < rows.length; i += 1) {
+      const current = rows[i];
+      const saved = savedRowsSnapshot[i];
+      if (!saved) return true;
+      if (current.rowId !== saved.rowId) return true;
+      if (current.spec !== saved.spec) return true;
+      if (current.note !== saved.note) return true;
+    }
+    return false;
+  }, [rows, savedRowsSnapshot]);
 
   function updateRow(rowId: Step4RowId, key: "spec" | "note", value: string) {
     setRows((prev) => {
@@ -2337,8 +2354,9 @@ export default function TechSpecPage() {
   }
 
   function handleSave() {
-    if (!id || locked) return;
+    if (!id || locked || !hasUnsavedChanges) return;
     setStep4Rows(id, rows);
+    setSavedRowsSnapshot(rows);
     addHistoryEvent(id, {
       stage: "step4",
       action: HISTORY_EVENT_TYPES.SAVE_STEP4,
@@ -2355,13 +2373,14 @@ export default function TechSpecPage() {
     const regenerated = generateTechSpecRows(loadedStep1, loadedStep2, loadedStep3);
     setRows(regenerated);
     setStep4Rows(id, regenerated);
+    setSavedRowsSnapshot(regenerated);
     setSelectedRowId(regenerated[0]?.rowId ?? null);
     setMessage("STEP1~3 기준으로 STEP4 초안을 재생성했습니다.");
   }
 
   function handleConfirm() {
     if (!id || locked) return;
-    handleSave();
+    if (hasUnsavedChanges) handleSave();
     setMessage("STEP4 확정 완료");
   }
 
@@ -2882,10 +2901,18 @@ export default function TechSpecPage() {
               <button style={saveButtonStyle} onClick={handleRegenerateDraft}>
                 초안 재생성
               </button>
-              <button style={saveButtonStyle} onClick={handleSave}>
+              <button
+                style={getActionButtonStyle(hasUnsavedChanges, locked || !hasUnsavedChanges)}
+                onClick={handleSave}
+                disabled={locked || !hasUnsavedChanges}
+              >
                 저장
               </button>
-              <button style={saveButtonStyle} onClick={handleConfirm}>
+              <button
+                style={getActionButtonStyle(hasUnsavedChanges, locked)}
+                onClick={handleConfirm}
+                disabled={locked}
+              >
                 POC 리뷰
               </button>
             </div>
@@ -3960,6 +3987,27 @@ const saveButtonStyle: CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
 };
+
+function getActionButtonStyle(primary: boolean, disabled: boolean): CSSProperties {
+  if (disabled) {
+    return {
+      ...saveButtonStyle,
+      background: "#f9fafb",
+      color: "#9ca3af",
+      borderColor: "#e5e7eb",
+      cursor: "not-allowed",
+    };
+  }
+  if (primary) {
+    return {
+      ...saveButtonStyle,
+      background: "#2563eb",
+      color: "#fff",
+      borderColor: "#2563eb",
+    };
+  }
+  return saveButtonStyle;
+}
 
 const dragHandleStyle: CSSProperties = {
   border: "none",

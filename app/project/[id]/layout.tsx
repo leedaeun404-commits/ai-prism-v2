@@ -64,6 +64,11 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
         label: "STEP 4 기술 명세",
         locked: !progress.step1Frozen || !progress.step2Completed || !progress.step3Completed,
       },
+      {
+        href: `/project/${id}/poc-review`,
+        label: "STEP 5 PoC 리뷰",
+        locked: !progress.step1Frozen || !progress.step2Completed || !progress.step3Completed,
+      },
     ],
     [id, progress]
   );

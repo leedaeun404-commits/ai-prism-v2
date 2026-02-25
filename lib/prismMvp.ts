@@ -149,6 +149,12 @@ export type Step3Policy = {
   reviewed: Record<Step3FieldKey, boolean>;
 };
 
+export type Step3SavedSnapshot = {
+  step1: Step1Data;
+  step2: Step2Data;
+  savedAt: number;
+};
+
 export type ProjectProgress = {
   step1Frozen: boolean;
   step2Completed: boolean;
@@ -293,6 +299,11 @@ const step3Schema = z.object({
     rollback_standard: z.boolean(),
     model_versioning: z.boolean(),
   }),
+});
+const step3SavedSnapshotSchema = z.object({
+  step1: step1Schema,
+  step2: step2Schema,
+  savedAt: z.number(),
 });
 
 const step4TabSchema = z.enum(STEP4_TAB_KEYS);
@@ -890,6 +901,17 @@ export function getStep3Policy(projectId: string): Step3Policy {
 
 export function setStep3Policy(projectId: string, data: Step3Policy) {
   writeJSON(key(projectId, "step3"), data);
+}
+
+export function getStep3SavedSnapshot(projectId: string): Step3SavedSnapshot | null {
+  const raw = readJSON(key(projectId, "step3_snapshot"));
+  const parsed = step3SavedSnapshotSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  return null;
+}
+
+export function setStep3SavedSnapshot(projectId: string, data: Step3SavedSnapshot) {
+  writeJSON(key(projectId, "step3_snapshot"), data);
 }
 
 export function getStep4Rows(projectId: string): Step4Row[] {

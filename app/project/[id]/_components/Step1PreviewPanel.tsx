@@ -20,6 +20,7 @@ import {
 export type Step1PreviewAreaKey = "strategy" | "policy" | "automation" | "state_flow" | "risk_profile";
 export type Step2PreviewFieldId = "user_flow" | "ai_intervention" | "human_control" | "system_process";
 export type Step3PreviewMetricId = "execution_level" | "approval_level" | "data_policy";
+type Step2SectionKey = "strategy" | "execution" | "flow" | "policy_metrics" | "risk";
 export type Step1PreviewRowId =
   | "why"
   | "target"
@@ -114,7 +115,7 @@ function areSourceTagsEqual(a: Step2FlowSourceTag[], b: Step2FlowSourceTag[]): b
 
 function formatSourceTagLabel(tag: Step2FlowSourceTag, mode: "step1" | "step2"): string {
   if (mode === "step2" && (tag.key === "step2_user_flow" || tag.key === "step2_ai_intervention" || tag.key === "step2_human_control" || tag.key === "step2_system_process")) {
-    return "Step2 수기 변경";
+    return "";
   }
   if (tag.key === "step1" || tag.key === "ai_task_types" || tag.key === "hitl" || tag.key === "result_state" || tag.key === "final_executor" || tag.key === "exposure") {
     return mode === "step2" ? `Step1 ${tag.label}` : tag.label;
@@ -148,13 +149,13 @@ function FlowStepList({
         const summaryLabels =
           sourceTagLabelMode === "summary"
             ? step.source_tags.length === 0
-              ? ["Step2 수기 변경"]
+              ? []
               : ["Step1 자동 생성"]
             : [];
         const detailedLabels =
           sourceTagLabelMode === "summary"
             ? []
-            : Array.from(new Set(step.source_tags.map((tag) => formatSourceTagLabel(tag, mode))));
+            : Array.from(new Set(step.source_tags.map((tag) => formatSourceTagLabel(tag, mode)).filter(Boolean)));
         const sourceLabels = sourceTagLabelMode === "summary" ? summaryLabels : detailedLabels;
         return (
           <div
@@ -191,10 +192,15 @@ export default function Step1PreviewPanel({
   data,
   step2Data,
   step3PolicyMetrics,
+  step3PolicyTitle = "정책 검증 지표",
+  step3PolicyPlacement = "before_flow",
+  step2SectionOrder,
   flowBaselineUserFlow,
   mode = "step1",
   flowSectionTitle,
+  executionSectionTitle,
   showExecutionSection = true,
+  executionDetailLevel = "compact",
   showFlowSourceTags = true,
   flowSourceTagTone = "blue",
   flowSourceTagLabelMode = "detailed",
@@ -211,10 +217,15 @@ export default function Step1PreviewPanel({
     approvalLevel: string;
     dataPolicy: string;
   } | null;
+  step3PolicyTitle?: string;
+  step3PolicyPlacement?: "before_flow" | "after_risk";
+  step2SectionOrder?: Step2SectionKey[];
   flowBaselineUserFlow?: string;
   mode?: "step1" | "step2";
   flowSectionTitle?: string;
+  executionSectionTitle?: string;
   showExecutionSection?: boolean;
+  executionDetailLevel?: "compact" | "full";
   showFlowSourceTags?: boolean;
   flowSourceTagTone?: "blue" | "neutral";
   flowSourceTagLabelMode?: "detailed" | "summary";
@@ -303,9 +314,43 @@ export default function Step1PreviewPanel({
   const impactSummary = data.impact ? `${IMPACT_LABEL[data.impact]} (impact=${data.impact})` : "미선택 (UNSET)";
   const hitlSummary = data.hitl ? `${HITL_LABEL[data.hitl]} (hitl=${data.hitl})` : "미선택 (UNSET)";
 
+  const step3PolicySection = step3PolicyMetrics ? (
+    <PreviewSection title={step3PolicyTitle} badge={STEP3_POLICY_METRICS_BADGE} active={Boolean(activeStep3MetricId)}>
+      <PreviewItem
+        label="실행 수준 (Execution Level)"
+        value={step3PolicyMetrics.executionLevel || "미선택 (UNSET)"}
+        highlighted={activeStep3MetricId === "execution_level"}
+      />
+      <PreviewItem
+        label="승인 수준 (Approval Level)"
+        value={step3PolicyMetrics.approvalLevel || "미선택 (UNSET)"}
+        highlighted={activeStep3MetricId === "approval_level"}
+      />
+      <PreviewItem
+        label="데이터 정책 (Data Policy)"
+        value={step3PolicyMetrics.dataPolicy || "미선택 (UNSET)"}
+        highlighted={activeStep3MetricId === "data_policy"}
+      />
+    </PreviewSection>
+  ) : null;
+
   if (mode === "step2") {
-    return (
-      <div style={previewFrameStyle}>
+    const defaultStep2SectionOrder: Step2SectionKey[] =
+      step3PolicyPlacement === "after_risk"
+        ? ["strategy", "flow", "risk", "policy_metrics", "execution"]
+        : ["strategy", "policy_metrics", "flow", "risk", "execution"];
+    const requestedOrder = step2SectionOrder && step2SectionOrder.length > 0 ? step2SectionOrder : defaultStep2SectionOrder;
+    const normalizedOrder = Array.from(
+      new Set(
+        [
+          ...requestedOrder.filter((key) => ["strategy", "execution", "flow", "policy_metrics", "risk"].includes(key)),
+          ...defaultStep2SectionOrder,
+        ] as Step2SectionKey[]
+      )
+    );
+
+    const sections: Partial<Record<Step2SectionKey, React.ReactNode>> = {
+      strategy: (
         <PreviewSection
           title="Step1 기획 의도"
           badge={STEP1_PREVIEW_BADGES.strategy}
@@ -317,31 +362,8 @@ export default function Step1PreviewPanel({
           <PreviewItem label="결과 상태 (Result State)" value={resultStateSummary} />
           <PreviewItem label="성공 가설 (KPI Hypothesis)" value={kpiSummary} />
         </PreviewSection>
-
-        {step3PolicyMetrics && (
-          <PreviewSection
-            title="정책 검증 지표"
-            badge={STEP3_POLICY_METRICS_BADGE}
-            active={Boolean(activeStep3MetricId)}
-          >
-            <PreviewItem
-              label="실행 수준 (Execution Level)"
-              value={step3PolicyMetrics.executionLevel || "미선택 (UNSET)"}
-              highlighted={activeStep3MetricId === "execution_level"}
-            />
-            <PreviewItem
-              label="승인 수준 (Approval Level)"
-              value={step3PolicyMetrics.approvalLevel || "미선택 (UNSET)"}
-              highlighted={activeStep3MetricId === "approval_level"}
-            />
-            <PreviewItem
-              label="데이터 정책 (Data Policy)"
-              value={step3PolicyMetrics.dataPolicy || "미선택 (UNSET)"}
-              highlighted={activeStep3MetricId === "data_policy"}
-            />
-          </PreviewSection>
-        )}
-
+      ),
+      flow: (
         <PreviewSection
           title={flowSectionTitle ?? "처리 플로우"}
           badge={STEP1_PREVIEW_BADGES.state_flow}
@@ -359,7 +381,8 @@ export default function Step1PreviewPanel({
             />
           </div>
         </PreviewSection>
-
+      ),
+      risk: (
         <PreviewSection
           title="Step1 기능 리스크"
           badge={STEP1_PREVIEW_BADGES.risk_profile}
@@ -371,53 +394,107 @@ export default function Step1PreviewPanel({
           <PreviewItem label="되돌림 가능성 (Reversibility)" value={reversibilitySummary} />
           <PreviewItem label="사람 개입 지점 (HITL)" value={hitlSummary} />
         </PreviewSection>
+      ),
+      policy_metrics: step3PolicySection ?? undefined,
+      execution: showExecutionSection ? (
+        <PreviewSection
+          title={executionSectionTitle ?? "Step1 실행 방식"}
+          badge={STEP1_PREVIEW_BADGES.automation}
+          active={activeArea === "automation"}
+          onClick={onAreaClick ? () => onAreaClick("automation") : undefined}
+        >
+          {executionDetailLevel === "full" ? (
+            <>
+              <PreviewItem label="AI 역할 (AI Role)" value={aiRoleSummary} />
+              <PreviewItem
+                label="AI 실행 방식 (AI Intervention)"
+                value={flowPreview.ai_intervention.value || "미입력"}
+                highlighted={activeStep2FieldId === "ai_intervention"}
+              />
+              <PreviewItem label="사람 개입 지점 (HITL)" value={humanReviewSummary} />
+              <PreviewItem
+                label="사람 개입 방식 (Human Control)"
+                value={flowPreview.human_control.value || "미입력"}
+                highlighted={activeStep2FieldId === "human_control"}
+              />
+              <PreviewItem label="게시/적용 방식 (Execution Authority)" value={executionAuthoritySummary} />
+              <PreviewItem
+                label="시스템 처리 구조 (System Process)"
+                value={flowPreview.system_process.value || "미입력"}
+                highlighted={activeStep2FieldId === "system_process"}
+              />
+              <PreviewItem label="자동 처리 허용 여부 (Conditional Delegation)" value={`${conditionalDelegationSummary}\n${signal}`} />
+            </>
+          ) : (
+            <>
+              <PreviewItem
+                label="AI 실행 방식 (AI Intervention)"
+                value={flowPreview.ai_intervention.value || "미입력"}
+                highlighted={activeStep2FieldId === "ai_intervention"}
+              />
+              <div style={previewTagWrapStyle}>
+                {flowPreview.ai_intervention.source_tags
+                  .map((tag) => ({ tag, label: formatSourceTagLabel(tag, mode) }))
+                  .filter((item) => Boolean(item.label))
+                  .map((item) => (
+                    <span
+                      key={`ai-${item.tag.key}-${item.tag.label}`}
+                      style={flowSourceTagTone === "neutral" ? previewSourceTagStyleNeutral : previewSourceTagStyle}
+                    >
+                      {item.label}
+                    </span>
+                  ))}
+              </div>
+              <PreviewItem
+                label="사람 개입 방식 (Human Control)"
+                value={flowPreview.human_control.value || "미입력"}
+                highlighted={activeStep2FieldId === "human_control"}
+              />
+              <div style={previewTagWrapStyle}>
+                {flowPreview.human_control.source_tags
+                  .map((tag) => ({ tag, label: formatSourceTagLabel(tag, mode) }))
+                  .filter((item) => Boolean(item.label))
+                  .map((item) => (
+                    <span
+                      key={`human-${item.tag.key}-${item.tag.label}`}
+                      style={flowSourceTagTone === "neutral" ? previewSourceTagStyleNeutral : previewSourceTagStyle}
+                    >
+                      {item.label}
+                    </span>
+                  ))}
+              </div>
+              <PreviewItem
+                label="시스템 처리 구조 (System Process)"
+                value={flowPreview.system_process.value || "미입력"}
+                highlighted={activeStep2FieldId === "system_process"}
+              />
+              <div style={previewTagWrapStyle}>
+                {flowPreview.system_process.source_tags
+                  .map((tag) => ({ tag, label: formatSourceTagLabel(tag, mode) }))
+                  .filter((item) => Boolean(item.label))
+                  .map((item) => (
+                    <span
+                      key={`sys-${item.tag.key}-${item.tag.label}`}
+                      style={flowSourceTagTone === "neutral" ? previewSourceTagStyleNeutral : previewSourceTagStyle}
+                    >
+                      {item.label}
+                    </span>
+                  ))}
+              </div>
+            </>
+          )}
+        </PreviewSection>
+      ) : undefined,
+    };
+    const orderedSectionNodes = normalizedOrder.map((key) => sections[key]).filter(Boolean);
 
-        {showExecutionSection && (
-          <PreviewSection
-            title="실행 방식"
-            badge={STEP1_PREVIEW_BADGES.automation}
-            active={activeArea === "automation"}
-            onClick={onAreaClick ? () => onAreaClick("automation") : undefined}
-            isLast
-          >
-            <PreviewItem
-              label="AI 실행 방식 (AI Intervention)"
-              value={flowPreview.ai_intervention.value || "미입력"}
-              highlighted={activeStep2FieldId === "ai_intervention"}
-            />
-            <div style={previewTagWrapStyle}>
-              {flowPreview.ai_intervention.source_tags.map((tag) => (
-                <span key={`ai-${tag.key}-${tag.label}`} style={previewSourceTagStyle}>
-                  {formatSourceTagLabel(tag, mode)}
-                </span>
-              ))}
-            </div>
-            <PreviewItem
-              label="사람 개입 방식 (Human Control)"
-              value={flowPreview.human_control.value || "미입력"}
-              highlighted={activeStep2FieldId === "human_control"}
-            />
-            <div style={previewTagWrapStyle}>
-              {flowPreview.human_control.source_tags.map((tag) => (
-                <span key={`human-${tag.key}-${tag.label}`} style={previewSourceTagStyle}>
-                  {formatSourceTagLabel(tag, mode)}
-                </span>
-              ))}
-            </div>
-            <PreviewItem
-              label="시스템 처리 구조 (System Process)"
-              value={flowPreview.system_process.value || "미입력"}
-              highlighted={activeStep2FieldId === "system_process"}
-            />
-            <div style={previewTagWrapStyle}>
-              {flowPreview.system_process.source_tags.map((tag) => (
-                <span key={`sys-${tag.key}-${tag.label}`} style={previewSourceTagStyle}>
-                  {formatSourceTagLabel(tag, mode)}
-                </span>
-              ))}
-            </div>
-          </PreviewSection>
-        )}
+    return (
+      <div style={previewFrameStyle}>
+        {orderedSectionNodes.map((section, idx) => (
+          <div key={`step2-section-${idx}`} style={idx === orderedSectionNodes.length - 1 ? { borderBottom: "none" } : undefined}>
+            {section}
+          </div>
+        ))}
       </div>
     );
   }

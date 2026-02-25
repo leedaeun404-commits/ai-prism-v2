@@ -941,7 +941,6 @@ export default function ScreeningPage() {
   function handleSave() {
     if (!id) return;
     setStep1Data(id, data);
-    setStep2Data(id, generateStep2Data(data));
     addHistoryEvent(id, {
       stage: "step1",
       action: HISTORY_EVENT_TYPES.SAVE_STEP1,
@@ -967,15 +966,10 @@ export default function ScreeningPage() {
       action: HISTORY_EVENT_TYPES.SET_HITL,
       detail: `인간 개입 시점=${data.hitl || "미정"}`,
     });
-    addHistoryEvent(id, {
-      stage: "step2",
-      action: HISTORY_EVENT_TYPES.GENERATE_STEP2_DRAFT,
-      detail: "STEP1 저장으로 STEP2 초안 자동 갱신",
-    });
     setSavedDataSnapshot(data);
     setSavedNotesSnapshot(tableNotes);
     setSavedRowOrderSnapshot(rowOrder);
-    setMessage("STEP1 저장 완료 (STEP2 초안 자동 갱신)");
+    setMessage("STEP1 저장 완료");
   }
 
   function handleFreeze() {

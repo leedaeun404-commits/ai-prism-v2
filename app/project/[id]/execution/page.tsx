@@ -202,6 +202,20 @@ export default function ExecutionPage() {
     }
     setStep2Data(id, draft);
     setFlowBaselineUserFlow(draft.user_flow);
+    addHistoryEvent(id, {
+      stage: "step2",
+      action: HISTORY_EVENT_TYPES.SAVE_STEP2,
+      detail: "STEP2 설계 초안 저장",
+    });
+    setMessage("STEP2 저장 완료");
+    return true;
+  }
+
+  function handleConfirm() {
+    if (!id || locked || !draft) return;
+    const saved = handleSave();
+    if (!saved) return;
+    setFlowBaselineUserFlow(draft.user_flow);
     const step1 = getStep1Data(id);
     const existingStep3 = getStep3Policy(id);
     const generatedStep3 = generateStep3Policy(step1, draft);
@@ -231,12 +245,7 @@ export default function ExecutionPage() {
     }
     const progressBefore = getProgress(id);
     setStep3Policy(id, mergedStep3);
-    setProgress(id, { step2Completed: true });
-    addHistoryEvent(id, {
-      stage: "step2",
-      action: HISTORY_EVENT_TYPES.SAVE_STEP2,
-      detail: "STEP2 설계 초안 저장",
-    });
+    setProgress(id, { step2Completed: true, step3Completed: false });
     if (!progressBefore.step2Completed) {
       addHistoryEvent(id, {
         stage: "step2",
@@ -247,15 +256,8 @@ export default function ExecutionPage() {
     addHistoryEvent(id, {
       stage: "step3",
       action: HISTORY_EVENT_TYPES.GENERATE_STEP3_POLICY,
-      detail: "STEP2 저장을 기반으로 STEP3 정책 초안 자동 생성/병합",
+      detail: "STEP2 확정으로 STEP3 정책 초안 자동 생성/병합",
     });
-    setMessage("STEP2 저장 완료");
-    return true;
-  }
-
-  function handleConfirm() {
-    const saved = handleSave();
-    if (!saved) return;
     setMessage("STEP2 확정 완료");
   }
 

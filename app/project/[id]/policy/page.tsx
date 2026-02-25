@@ -15,6 +15,7 @@ import {
   getStep3Policy,
   setProgress,
   setStep3Policy,
+  setStep3SavedSnapshot,
   type Step1Data,
   type Step2Data,
   type Step3Policy,
@@ -383,14 +384,34 @@ export default function PolicyPage() {
       return;
     }
 
-    const progressBefore = getProgress(id);
     setStep3Policy(id, policy);
-    setProgress(id, { step3Completed: true });
     addHistoryEvent(id, {
       stage: "step3",
       action: HISTORY_EVENT_TYPES.SAVE_STEP3,
       detail: "STEP3 정책 저장(검토 완료)",
     });
+    setMessage("STEP3 저장 완료");
+  }
+
+  function handleConfirm() {
+    if (!id || locked || !policy) return;
+    if (!canCompleteStep3(policy)) {
+      const missing = getStep3MissingFields(policy);
+      setMessage(`확정 불가: 필수 항목을 완료하세요 (${missing.length}개 누락).`);
+      return;
+    }
+    handleSave();
+    const progressBefore = getProgress(id);
+    const latestStep1 = getStep1Data(id);
+    const latestStep2 = getStep2Data(id);
+    if (latestStep1 && latestStep2) {
+      setStep3SavedSnapshot(id, {
+        step1: latestStep1,
+        step2: latestStep2,
+        savedAt: Date.now(),
+      });
+    }
+    setProgress(id, { step3Completed: true });
     if (!progressBefore.step3Completed) {
       addHistoryEvent(id, {
         stage: "step3",
@@ -398,11 +419,6 @@ export default function PolicyPage() {
         detail: "STEP3 완료 상태로 전환",
       });
     }
-    setMessage("STEP3 저장 완료");
-  }
-
-  function handleConfirm() {
-    handleSave();
     setMessage("STEP3 확정 완료");
   }
 
