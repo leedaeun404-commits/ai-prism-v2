@@ -1329,26 +1329,261 @@ export function generateTechSpec(step1: Step1Data, step2Draft: string, step3: St
   ].join("\n");
 }
 
+type TechSpecStateRow = {
+  state: string;
+  meaning: string;
+  enterCondition: string;
+  exitCondition: string;
+};
+
+type TechSpecApiRow = {
+  method: string;
+  endpoint: string;
+  purpose: string;
+};
+
+type TechSpecSchemaRow = {
+  field: string;
+  type: string;
+  description: string;
+  required: "ON" | "OFF";
+};
+
+function normalizeTechSpecText(value: string): string {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/→/g, "->")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+}
+
+function normalizeFlowTokens(value: string): string[] {
+  return parseFlowStepsFromText(normalizeTechSpecText(value))
+    .map((token) => token.replace(/^\d+[\).\s]+/, "").trim())
+    .filter(Boolean);
+}
+
+function inferStateId(token: string): string {
+  const t = token.toLowerCase();
+  if (t.includes("요청 시작") || t.includes("입력 작성") || t === "input") return "input";
+  if (t.includes("분류")) return "classifying";
+  if (t.includes("생성") || t.includes("generate") || t.includes("generating")) return "generating";
+  if (t.includes("개선") || t.includes("revision")) return "revising";
+  if (t.includes("후보")) return "suggesting";
+  if (t.includes("검토") || t.includes("review")) return "review_required";
+  if (t.includes("승인 보조")) return "approval_assist";
+  if (t.includes("결과 기록") || t.includes("저장")) return "draft_saved";
+  if (t.includes("게시") || t.includes("publish")) return "published";
+  if (t.includes("실패") || t.includes("fail")) return "failed";
+  return slugifyFlowLabel(token).replace(/-/g, "_");
+}
+
+function defaultStateMeaning(state: string): string {
+  if (state === "input") return "입력 수집 단계";
+  if (state === "classifying") return "입력 분류 단계";
+  if (state === "generating") return "AI 생성 처리 단계";
+  if (state === "revising") return "개선/재작성 단계";
+  if (state === "suggesting") return "후보안 제시 단계";
+  if (state === "review_required") return "사람 검토/승인 대기 단계";
+  if (state === "approval_assist") return "승인 판단 보조 단계";
+  if (state === "draft_saved") return "초안 저장 완료 단계";
+  if (state === "published") return "외부 반영/게시 완료 단계";
+  if (state === "failed") return "처리 실패 단계";
+  return "상태 정의 필요";
+}
+
+function buildStateModelRows(step1: Step1Data, step2: Step2Data, step3: Step3Policy): TechSpecStateRow[] {
+  const policyText = `${step3.automation_level_adjustment} ${step3.auto_processing_scope}`.toLowerCase();
+  const fromFlow = normalizeFlowTokens(step2.user_flow);
+  const fallback = normalizeFlowTokens(step2.system_process);
+  const baseTokens = fromFlow.length > 0 ? fromFlow : fallback;
+
+  const orderedStates: string[] = [];
+  for (const token of baseTokens) {
+    const nextState = inferStateId(token);
+    if (!nextState) continue;
+    if (orderedStates[orderedStates.length - 1] !== nextState) orderedStates.push(nextState);
+  }
+
+  if (orderedStates.length === 0) {
+    orderedStates.push("input", "generating", "draft_saved");
+  }
+
+  if (policyText.includes("승인") && !orderedStates.includes("review_required")) {
+    const draftIndex = orderedStates.findIndex((state) => state === "draft_saved");
+    if (draftIndex >= 0) orderedStates.splice(draftIndex, 0, "review_required");
+    else orderedStates.push("review_required");
+  }
+  if (step1.hitl === "pre_review" && !orderedStates.includes("review_required")) {
+    orderedStates.push("review_required");
+  }
+  if (step1.result_state === "published_or_executed" && !orderedStates.includes("published")) {
+    orderedStates.push("published");
+  }
+  if (step1.result_state === "failed" && !orderedStates.includes("failed")) {
+    orderedStates.push("failed");
+  }
+
+  return orderedStates.map((state, index) => ({
+    state,
+    meaning: defaultStateMeaning(state),
+    enterCondition: index === 0 ? "요청 시작" : `${orderedStates[index - 1]} 처리 완료`,
+    exitCondition: index < orderedStates.length - 1 ? orderedStates[index + 1] : "-",
+  }));
+}
+
+function stringifyStateModelRows(rows: TechSpecStateRow[]): string {
+  return rows.map((row) => [row.state, row.meaning, row.enterCondition, row.exitCondition].join("\t")).join("\n");
+}
+
+function pushUniqueApiRow(rows: TechSpecApiRow[], nextRow: TechSpecApiRow) {
+  const exists = rows.some((row) => row.method === nextRow.method && row.endpoint === nextRow.endpoint);
+  if (!exists) rows.push(nextRow);
+}
+
+function buildApiRows(step1: Step1Data, step3: Step3Policy): TechSpecApiRow[] {
+  const taskSet = new Set(step1.ai_task_types);
+  const approvalPolicy = step3.auto_processing_scope.toLowerCase();
+  const rows: TechSpecApiRow[] = [];
+
+  pushUniqueApiRow(rows, { method: "POST", endpoint: "/posts", purpose: "프로젝트/초안 생성 요청 수신" });
+  if (
+    taskSet.has("draft_generation") ||
+    taskSet.has("revision_suggestion") ||
+    taskSet.has("candidate_suggestion") ||
+    taskSet.has("classification") ||
+    taskSet.has("policy_check")
+  ) {
+    pushUniqueApiRow(rows, { method: "POST", endpoint: "/posts/{id}/generate", purpose: "AI 생성/제안/분류 실행" });
+  }
+  if (taskSet.has("revision_suggestion")) {
+    pushUniqueApiRow(rows, { method: "PATCH", endpoint: "/posts/{id}", purpose: "사용자 수정 반영 및 상태 갱신" });
+  }
+  if (taskSet.has("approval_assist") || step1.hitl !== "none" || step1.result_state === "review_requested" || approvalPolicy.includes("승인")) {
+    pushUniqueApiRow(rows, { method: "POST", endpoint: "/posts/{id}/publish-request", purpose: "승인 요청 생성" });
+    pushUniqueApiRow(rows, { method: "POST", endpoint: "/posts/{id}/approve", purpose: "승인/반려 처리" });
+  }
+  if (step1.exposure === "public" || step1.result_state === "published_or_executed" || approvalPolicy.includes("전면")) {
+    pushUniqueApiRow(rows, { method: "POST", endpoint: "/posts/{id}/publish", purpose: "외부 반영(게시/실행) 처리" });
+  }
+  return rows;
+}
+
+function stringifyApiRows(rows: TechSpecApiRow[]): string {
+  return rows.map((row) => [row.method, row.endpoint, row.purpose].join("\t")).join("\n");
+}
+
+function pushUniqueSchemaRow(rows: TechSpecSchemaRow[], nextRow: TechSpecSchemaRow) {
+  const exists = rows.some((row) => row.field === nextRow.field);
+  if (!exists) rows.push(nextRow);
+}
+
+function buildInputSchemaRows(step1: Step1Data): TechSpecSchemaRow[] {
+  const taskSet = new Set(step1.ai_task_types);
+  const rows: TechSpecSchemaRow[] = [];
+  pushUniqueSchemaRow(rows, { field: "topic", type: "string", description: "요청 주제", required: "ON" });
+  pushUniqueSchemaRow(rows, { field: "platform", type: "enum", description: "게시 플랫폼", required: "ON" });
+  pushUniqueSchemaRow(rows, { field: "tone", type: "enum", description: "문체/톤", required: "OFF" });
+
+  if (taskSet.has("draft_generation") || taskSet.has("revision_suggestion")) {
+    pushUniqueSchemaRow(rows, { field: "key_messages", type: "string[]", description: "핵심 메시지 목록", required: "OFF" });
+    pushUniqueSchemaRow(rows, { field: "constraints", type: "string", description: "길이/금지어/형식 제약", required: "OFF" });
+  }
+  if (taskSet.has("classification")) {
+    pushUniqueSchemaRow(rows, { field: "content_type", type: "enum", description: "입력 콘텐츠 분류 기준", required: "ON" });
+  }
+  if (taskSet.has("candidate_suggestion")) {
+    pushUniqueSchemaRow(rows, { field: "candidate_count", type: "number", description: "추천 후보 개수", required: "OFF" });
+  }
+  if (taskSet.has("revision_suggestion")) {
+    pushUniqueSchemaRow(rows, { field: "existing_draft", type: "string", description: "기존 초안 본문", required: "ON" });
+    pushUniqueSchemaRow(rows, { field: "improvement_goal", type: "string", description: "개선 목표", required: "OFF" });
+  }
+  if (taskSet.has("policy_check")) {
+    pushUniqueSchemaRow(rows, { field: "policy_profile", type: "string", description: "정책 검사 프로필", required: "OFF" });
+  }
+  return rows;
+}
+
+function buildOutputSchemaRows(step1: Step1Data, step3: Step3Policy): TechSpecSchemaRow[] {
+  const taskSet = new Set(step1.ai_task_types);
+  const rows: TechSpecSchemaRow[] = [];
+  const policyText = `${step3.auto_processing_scope} ${step3.data_assetization_strategy}`.toLowerCase();
+
+  pushUniqueSchemaRow(rows, { field: "draft_text", type: "string", description: "생성된 초안 텍스트", required: "ON" });
+  pushUniqueSchemaRow(rows, { field: "confidence", type: "number", description: "모델 신뢰도 점수", required: "OFF" });
+  pushUniqueSchemaRow(rows, { field: "rationale", type: "string", description: "생성 근거 요약", required: "OFF" });
+
+  if (taskSet.has("candidate_suggestion")) {
+    pushUniqueSchemaRow(rows, { field: "candidates", type: "string[]", description: "후보 제안 목록", required: "OFF" });
+  }
+  if (taskSet.has("revision_suggestion")) {
+    pushUniqueSchemaRow(rows, { field: "revised_text", type: "string", description: "개선된 본문", required: "OFF" });
+    pushUniqueSchemaRow(rows, { field: "revision_points", type: "string[]", description: "수정 포인트 목록", required: "OFF" });
+  }
+  if (taskSet.has("classification")) {
+    pushUniqueSchemaRow(rows, { field: "class_label", type: "string", description: "분류 결과 라벨", required: "OFF" });
+    pushUniqueSchemaRow(rows, { field: "class_confidence", type: "number", description: "분류 신뢰도", required: "OFF" });
+  }
+  if (taskSet.has("policy_check")) {
+    pushUniqueSchemaRow(rows, { field: "policy_flags", type: "string[]", description: "정책 위반/주의 항목", required: "OFF" });
+  }
+
+  if (policyText.includes("승인")) {
+    pushUniqueSchemaRow(rows, { field: "approval_status", type: "enum", description: "승인 상태(pending/approved/rejected)", required: "ON" });
+  }
+  if (policyText.includes("익명 저장") || policyText.includes("학습 활용")) {
+    pushUniqueSchemaRow(rows, { field: "trace_id", type: "string", description: "익명화 추적 ID", required: "OFF" });
+    pushUniqueSchemaRow(rows, { field: "log_version", type: "string", description: "정책/모델 로그 버전", required: "OFF" });
+  }
+
+  return rows;
+}
+
+function stringifySchemaRows(rows: TechSpecSchemaRow[]): string {
+  return rows.map((row) => [row.field, row.type, row.description, row.required].join("\t")).join("\n");
+}
+
+function buildPolicyNote(step3: Step3Policy): string {
+  const autoText = normalizeTechSpecText(step3.automation_level_adjustment);
+  const approvalText = normalizeTechSpecText(step3.auto_processing_scope);
+  const dataText = normalizeTechSpecText(step3.data_assetization_strategy);
+  const logs: string[] = [];
+  if (dataText.includes("익명 저장")) logs.push("로그 저장: 익명 저장 기준(trace_id 중심)");
+  if (dataText.includes("학습 활용")) logs.push("로그 저장: 학습 활용 가능 데이터 분리 저장");
+  if (dataText.includes("저장 안 함")) logs.push("로그 저장: 개인정보/원문 저장 금지");
+  return [
+    `실행 정책: ${autoText || "미정"}`,
+    `승인 정책: ${approvalText || "미정"}`,
+    `데이터 정책: ${dataText || "미정"}`,
+    ...logs,
+  ].join(", ");
+}
+
 export function generateTechSpecRows(step1: Step1Data, step2: Step2Data, step3: Step3Policy): Step4Row[] {
-  void step1;
-  const stateModel = step2.system_process || "input -> generating -> draft -> user_edit -> review_requested -> published";
-  void step3;
+  const stateRows = buildStateModelRows(step1, step2, step3);
+  const apiRows = buildApiRows(step1, step3);
+  const inputRows = buildInputSchemaRows(step1);
+  const outputRows = buildOutputSchemaRows(step1, step3);
+  const policyNote = buildPolicyNote(step3);
+
   const contentById: Record<Step4RowId, Pick<Step4Row, "spec" | "note">> = {
     api_definition: {
-      spec: "POST /posts\nPOST /posts/{id}/generate\nPATCH /posts/{id}\nPOST /posts/{id}/publish-request\nPOST /posts/{id}/approve",
-      note: "generate/approve 권한 체크 필수, rate limit 필수, 에러코드(400/401/429/500) 정의",
+      spec: stringifyApiRows(apiRows),
+      note: `권한 체크/Rate Limit/에러코드(400/401/429/500) 정의, ${policyNote}`,
     },
     input_schema: {
-      spec: "topic, platform, tone, key_messages[], constraints",
-      note: "필수/선택 구분, platform/tone enum 고정, 최대 길이 제한 필요",
+      spec: stringifySchemaRows(inputRows),
+      note: `필수/선택 구분 및 enum/길이 제한 정의, ${policyNote}`,
     },
     output_schema: {
-      spec: "draft_text, hashtags[], cta, confidence, rationale",
-      note: "confidence 내부 기준, rationale 노출 여부 정책 필요",
+      spec: stringifySchemaRows(outputRows),
+      note: `결과 상태/승인 상태/로그 필드 반영 여부 검토, ${policyNote}`,
     },
     state_model: {
-      spec: stateModel,
-      note: "DB enum 고정 필요, failed/rejected 상태 추가 권장",
+      spec: stringifyStateModelRows(stateRows),
+      note: `상태 전이 자동 생성(사용자 흐름+시스템 처리 기준), ${policyNote}`,
     },
   };
 

@@ -2,7 +2,7 @@
 
 import { memo, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   addHistoryEvent,
   canAccessTechSpec,
@@ -194,15 +194,25 @@ const MIN_TWO_PANE_WIDTH = MIN_MAIN_PANEL_WIDTH + MIN_RIGHT_PANEL_WIDTH + TWO_PA
 const DIAGRAM_TABS: Array<{ key: DiagramTab; label: string }> = [
   { key: "state", label: "State" },
   { key: "sequence", label: "Sequence" },
-  { key: "error_retry", label: "Error/Retry" },
-  { key: "auth", label: "Auth Matrix" },
-  { key: "dataflow", label: "Data Flow" },
   { key: "observability", label: "Observability" },
   { key: "pipeline", label: "Pipeline" },
+  { key: "ia", label: "IA" },
+  { key: "dataflow", label: "Data Flow" },
+  { key: "error_retry", label: "Error/Retry" },
+  { key: "auth", label: "Auth Matrix" },
   { key: "rollback", label: "Rollback" },
   { key: "cost", label: "Cost Path" },
-  { key: "ia", label: "IA" },
 ];
+
+const DISABLED_DIAGRAM_TABS = new Set<DiagramTab>([
+  "pipeline",
+  "ia",
+  "dataflow",
+  "error_retry",
+  "auth",
+  "rollback",
+  "cost",
+]);
 
 const RIGHT_PANEL_TABS: Array<{ key: RightPanelTab; label: string }> = [
   { key: "preview", label: "Preview" },
@@ -2216,7 +2226,14 @@ const InputSchemaSheetPicker = memo(function InputSchemaSheetPicker({
 export default function TechSpecPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const id = String(params?.id ?? "");
+  const initialDiagramTab = useMemo<DiagramTab>(() => {
+    const raw = searchParams.get("diagram");
+    if (!raw) return "state";
+    return DIAGRAM_TAB_META[raw as DiagramTab] ? (raw as DiagramTab) : "state";
+  }, [searchParams]);
+  const isDiagramOnly = useMemo(() => searchParams.get("diagramOnly") === "1", [searchParams]);
 
   const [locked, setLocked] = useState(true);
   const [rows, setRows] = useState<Step4Row[]>([]);
@@ -2234,7 +2251,7 @@ export default function TechSpecPage() {
   const [isSelecting, setIsSelecting] = useState(false);
   const [editingValueRowId, setEditingValueRowId] = useState<Step4RowId | null>(null);
   const [editingNoteRowId, setEditingNoteRowId] = useState<Step4RowId | null>(null);
-  const [diagramTab, setDiagramTab] = useState<DiagramTab>("state");
+  const [diagramTab, setDiagramTab] = useState<DiagramTab>(initialDiagramTab);
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("preview");
   const [selectedRowId, setSelectedRowId] = useState<Step4RowId | null>(null);
   const [rightPanelWidth, setRightPanelWidth] = useState(560);
@@ -2330,10 +2347,27 @@ export default function TechSpecPage() {
     setMessage("STEP4 저장 완료");
   }
 
+  function handleRegenerateDraft() {
+    if (!id || locked) return;
+    const loadedStep1 = getStep1Data(id);
+    const loadedStep2 = getStep2Data(id);
+    const loadedStep3 = getStep3Policy(id);
+    const regenerated = generateTechSpecRows(loadedStep1, loadedStep2, loadedStep3);
+    setRows(regenerated);
+    setStep4Rows(id, regenerated);
+    setSelectedRowId(regenerated[0]?.rowId ?? null);
+    setMessage("STEP1~3 기준으로 STEP4 초안을 재생성했습니다.");
+  }
+
   function handleConfirm() {
     if (!id || locked) return;
     handleSave();
     setMessage("STEP4 확정 완료");
+  }
+
+  function handleOpenDiagramNewWindow() {
+    const url = `/project/${id}/tech-spec?diagram=${diagramTab}&diagramOnly=1`;
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   const specMap = useMemo(() => {
@@ -2356,16 +2390,33 @@ export default function TechSpecPage() {
     const outputSchema = summarizeOutputSchema(specMap.get("output_schema") || "");
     const guardrail = specMap.get("guardrail_policy") || "confidence < 0.7 경고 + 정책 필터";
     const model = specMap.get("model_conditions") || "기본 모델 + 조건부 상위 모델";
+    const toStateDisplayLabel = (state: string) => {
+      const key = state.trim().toLowerCase();
+      if (key === "input") return "입력 (Input)";
+      if (key === "generating") return "생성 중 (Generating)";
+      if (key === "draft") return "초안 (Draft)";
+      if (key === "revising") return "개선 중 (Revising)";
+      if (key === "review_required") return "검토 대기 (Review Required)";
+      if (key === "draft_saved") return "초안 저장 (Draft Saved)";
+      if (key === "published") return "게시 완료 (Published)";
+      if (key === "failed") return "실패 (Failed)";
+      if (!state.trim()) return "상태 미정 (Unknown State)";
+      return `${state} (${state})`;
+    };
 
     if (diagramTab === "state") {
       const safeStates = states.length > 0 ? states : ["input", "generating", "draft", "publish", "failed"];
-      const lines = ["flowchart LR"];
+      const lines = [
+        "flowchart LR",
+        "  L1[상태 (State)] --> L2[상태 전이 (State Transition)]",
+        "  L2 --> L3[종료 조건 (Exit Condition)]",
+      ];
       safeStates.forEach((st, idx) => {
-        lines.push(`  S${idx}[${st}]`);
-        if (idx > 0) lines.push(`  S${idx - 1} --> S${idx}`);
+        lines.push(`  S${idx}[${toStateDisplayLabel(st)}]`);
+        if (idx > 0) lines.push(`  S${idx - 1} -->|상태 전이 (State Transition)| S${idx}`);
       });
-      lines.push(`  S${Math.max(0, safeStates.length - 2)} --> FAIL[failed]`);
-      lines.push(`  S${Math.max(0, safeStates.length - 1)} --> END[published]`);
+      lines.push(`  S${Math.max(0, safeStates.length - 2)} --> FAIL[실패 종료 (Failed)]`);
+      lines.push(`  S${Math.max(0, safeStates.length - 1)} --> END[게시 종료 (Published)]`);
       return lines.join("\n");
     }
 
@@ -2387,20 +2438,20 @@ export default function TechSpecPage() {
       const approveApi = api[4] || api[3] || "POST /posts/{id}/approve";
       return [
         "sequenceDiagram",
-        "  participant U as User",
+        "  participant U as 요청자 (User)",
         "  participant UI as PRISM UI",
-        "  participant API as Backend API",
-        "  participant M as AI Model",
-        "  participant DB as DB",
-        `  U->>UI: 요청`,
-        `  UI->>API: ${mainApi}`,
-        "  API->>M: generate call",
-        "  M-->>API: draft result",
-        `  API->>DB: ${saveApi} (save draft + logs)`,
-        "  API-->>UI: draft + status",
-        `  UI->>API: ${approveApi}`,
-        "  API->>DB: state transition + audit log",
-        "  UI-->>U: 결과 표시",
+        "  participant API as 백엔드 API (Backend API)",
+        "  participant M as AI 모델 (AI Model)",
+        "  participant DB as 데이터베이스 (DB)",
+        "  U->>UI: 요청 (Request)",
+        `  UI->>API: 요청 전달 (Request) - ${mainApi}`,
+        "  API->>M: 모델 호출 (Model Call)",
+        "  M-->>API: 모델 응답 (Model Response)",
+        `  API->>DB: 상태 반영 (State Update) - ${saveApi} / 초안 저장 및 로그 (Save Draft + Logs)`,
+        "  API-->>UI: 상태 반영 결과 (State Update Result)",
+        `  UI->>API: 승인 요청 (Request) - ${approveApi}`,
+        "  API->>DB: 상태 반영 (State Update) - 전이 및 감사 로그 (Transition + Audit Log)",
+        "  UI-->>U: 결과 반환 (Response)",
       ].join("\n");
     }
 
@@ -2445,14 +2496,60 @@ export default function TechSpecPage() {
     }
 
     if (diagramTab === "observability") {
+      const apiEndpoints = apiRows.map((row) => row.endpoint.trim().toLowerCase()).filter(Boolean);
+      const stateNames = states.map((s) => s.trim().toLowerCase()).filter(Boolean);
+      const outputFields = parseOutputSchemaSheet(specMap.get("output_schema") || "")
+        .rows.map((row) => row.field.trim().toLowerCase())
+        .filter(Boolean);
+
+      const hasReview =
+        stateNames.includes("review_required") ||
+        apiEndpoints.some((endpoint) => endpoint.includes("approve") || endpoint.includes("publish-request"));
+
+      const stageOrder: Array<{ id: string; label: string }> = [
+        { id: "VAL", label: "검증 단계 (Validation)" },
+        { id: "MOD", label: "모델 호출 단계 (Model Call)" },
+        { id: "PER", label: "저장 단계 (Persist)" },
+      ];
+      if (hasReview) stageOrder.push({ id: "REV", label: "검토 단계 (Review)" });
+      stageOrder.push({ id: "RES", label: "응답 단계 (Response)" });
+
+      const outputRecommended = [
+        ...new Set(outputFields.filter((field) => ["trace_id", "confidence"].includes(field))),
+      ];
+      const outputRecommendedLabel =
+        outputRecommended.length > 0 ? outputRecommended.join(", ") : "confidence, trace_id";
+
       return [
         "flowchart LR",
-        "  API[API Stage] --> MET[Metrics]",
-        "  API --> LOG[Logs]",
-        "  API --> TRACE[Trace]",
-        `  MET --> DASH[Dashboard: ${monitor.replace(/\n/g, " / ")}]`,
-        "  LOG --> ALERT[Alert Rule]",
-        "  TRACE --> RCA[Root Cause 분석]",
+        ...stageOrder.map((stage) => `  ${stage.id}[${stage.label}]`),
+        ...stageOrder.slice(1).map((stage, index) => `  ${stageOrder[index].id} --> ${stage.id}`),
+        "  RES --> RCA",
+        "  MET[지표 (Metrics)]",
+        "  MODM[모델 호출 지표 (Model Call): latency_ms, token_usage, cost_estimate]",
+        "  PERM[저장 지표 (Persist): storage_success_rate]",
+        ...(hasReview ? ["  REVM[검토 지표 (Review): manual_intervention_rate, edit_rate]"] : []),
+        "  FLOWM[전체 흐름 지표 (Flow): end_to_end_latency]",
+        `  OUTM[출력 스키마 기반 권장 (Output Schema): ${outputRecommendedLabel}]`,
+        "  DSH[대시보드 (Dashboard)]",
+        "  LOG[로그 (Logs)]",
+        "  TRC[추적 (Trace)]",
+        `  MON[운영 지표 요약 (Monitoring): ${monitor.replace(/\n/g, " / ")}]`,
+        "  ALT[알림 규칙 (Alert Rule)]",
+        "  RCA[원인 분석 (Root Cause)]",
+        `  VAL --> MET`,
+        ...(hasReview ? ["  REV --> LOG"] : ["  PER --> LOG"]),
+        "  MET --> MODM",
+        "  MET --> PERM",
+        ...(hasReview ? ["  MET --> REVM"] : []),
+        "  MET --> FLOWM",
+        "  MET --> OUTM",
+        "  MET --> DSH",
+        "  LOG --> TRC",
+        "  LOG --> MON",
+        "  TRC --> ALT",
+        "  MON --> DSH",
+        "  TRC --> RCA",
       ].join("\n");
     }
 
@@ -2741,6 +2838,36 @@ export default function TechSpecPage() {
     }
   }
 
+  if (isDiagramOnly) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#fff", padding: 16 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          {DIAGRAM_TABS.map((tab) => {
+            const disabled = DISABLED_DIAGRAM_TABS.has(tab.key);
+            return (
+              <button
+                key={`popup-${tab.key}`}
+                onClick={() => {
+                  if (disabled) return;
+                  setDiagramTab(tab.key);
+                }}
+                disabled={disabled}
+                style={getDiagramTabButtonStyle(tab.key, diagramTab === tab.key, disabled)}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+        {diagramTab === "sequence" ? (
+          <SequenceDiagramView source={diagramText} />
+        ) : (
+          <FlowchartDiagramView source={diagramText} />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       ref={twoPaneRef}
@@ -2752,11 +2879,14 @@ export default function TechSpecPage() {
           <h1 style={titleStyle}>STEP 4 기술 명세</h1>
           {!locked && (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button style={saveButtonStyle} onClick={handleRegenerateDraft}>
+                초안 재생성
+              </button>
               <button style={saveButtonStyle} onClick={handleSave}>
                 저장
               </button>
               <button style={saveButtonStyle} onClick={handleConfirm}>
-                POC 돌리기
+                POC 리뷰
               </button>
             </div>
           )}
@@ -3135,21 +3265,39 @@ export default function TechSpecPage() {
           <>
             <p style={{ ...subtleStyle, marginTop: 8 }}>STEP4 편집 내용이 실시간으로 다이어그램에 반영됩니다.</p>
             <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-              {DIAGRAM_TABS.map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setDiagramTab(tab.key)}
-                  style={getDiagramTabButtonStyle(tab.key, diagramTab === tab.key)}
-                >
-                  {tab.label}
-                </button>
-              ))}
+              {DIAGRAM_TABS.map((tab) => {
+                const disabled = DISABLED_DIAGRAM_TABS.has(tab.key);
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => {
+                      if (disabled) return;
+                      setDiagramTab(tab.key);
+                    }}
+                    disabled={disabled}
+                    style={getDiagramTabButtonStyle(tab.key, diagramTab === tab.key, disabled)}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
             </div>
-            {diagramTab === "sequence" ? (
-              <SequenceDiagramView source={diagramText} />
-            ) : (
-              <FlowchartDiagramView source={diagramText} />
-            )}
+            <div style={diagramPanelWrapStyle}>
+              {diagramTab === "sequence" ? (
+                <SequenceDiagramView source={diagramText} />
+              ) : (
+                <FlowchartDiagramView source={diagramText} />
+              )}
+              <button
+                type="button"
+                onClick={handleOpenDiagramNewWindow}
+                style={diagramOpenWindowButtonStyle}
+                title="새창으로 크게 보기"
+                aria-label="새창으로 크게 보기"
+              >
+                ↗
+              </button>
+            </div>
           </>
         )}
 
@@ -4024,8 +4172,19 @@ const moreToggleStyle: CSSProperties = {
   textAlign: "left",
 };
 
-function getDiagramTabButtonStyle(tab: DiagramTab, active: boolean): CSSProperties {
+function getDiagramTabButtonStyle(tab: DiagramTab, active: boolean, disabled: boolean): CSSProperties {
   const meta = DIAGRAM_TAB_META[tab];
+  if (disabled) {
+    return {
+      ...tabButtonStyle,
+      background: "#f3f4f6",
+      color: "#9ca3af",
+      borderColor: "#d1d5db",
+      textDecoration: "line-through",
+      cursor: "not-allowed",
+      opacity: 0.9,
+    };
+  }
   if (active) {
     return {
       ...tabButtonStyle,
@@ -4079,8 +4238,12 @@ const SequenceDiagramView = memo(function SequenceDiagramView({ source }: { sour
   const startX = 56;
   const topY = 24;
   const lifelineTop = 78;
-  const rowGap = 42;
-  const rawWidth = startX * 2 + (parsed.participants.length - 1) * colWidth;
+  const rowGap = 56;
+  const messageTextWidthEstimate = Math.max(0, ...parsed.messages.map((m) => m.text.length)) * 6.8;
+  const rawWidth = Math.max(
+    startX * 2 + (parsed.participants.length - 1) * colWidth,
+    startX * 2 + messageTextWidthEstimate + 120
+  );
   const rawHeight = lifelineTop + 30 + parsed.messages.length * rowGap;
   const width = Math.max(PREVIEW_MIN_CANVAS_WIDTH, rawWidth);
   const height = Math.max(PREVIEW_MIN_CANVAS_HEIGHT, rawHeight);
@@ -4088,7 +4251,7 @@ const SequenceDiagramView = memo(function SequenceDiagramView({ source }: { sour
 
   return (
     <div style={diagramViewportStyle}>
-      <svg viewBox={`0 0 ${width} ${height}`} style={sequenceSvgStyle}>
+      <svg viewBox={`0 0 ${width} ${height}`} style={diagramSvgStyle}>
         <defs>
           <marker id="arrow-end" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151" />
@@ -4137,6 +4300,36 @@ const SequenceDiagramView = memo(function SequenceDiagramView({ source }: { sour
 });
 
 const FlowchartDiagramView = memo(function FlowchartDiagramView({ source }: { source: string }) {
+  function splitNodeLabel(label: string, maxChars = 20, maxLines = 6): string[] {
+    const text = label.trim();
+    if (!text) return [""];
+    if (text.length <= maxChars) return [text];
+
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length <= 1 || !text.includes(" ")) {
+      const chunks: string[] = [];
+      for (let i = 0; i < text.length; i += maxChars) {
+        chunks.push(text.slice(i, i + maxChars));
+      }
+      return chunks.slice(0, maxLines);
+    }
+
+    const lines: string[] = [];
+    let current = "";
+    for (const word of words) {
+      const next = current ? `${current} ${word}` : word;
+      if (next.length <= maxChars) {
+        current = next;
+      } else {
+        if (current) lines.push(current);
+        current = word;
+        if (lines.length >= maxLines - 1) break;
+      }
+    }
+    if (lines.length < maxLines && current) lines.push(current);
+    return lines.slice(0, maxLines);
+  }
+
   const parsed = useMemo(() => {
     const lines = source.split("\n").map((x) => x.trim()).filter(Boolean);
     const first = lines[0] ?? "";
@@ -4153,6 +4346,28 @@ const FlowchartDiagramView = memo(function FlowchartDiagramView({ source }: { so
         const toLabel = edgeWithLabels[4];
         nodeMap.set(from, fromLabel);
         nodeMap.set(to, toLabel);
+        edges.push({ from, to });
+        continue;
+      }
+
+      const edgeToLabeled = line.match(/^([A-Za-z0-9_]+)\s*-->\s*([A-Za-z0-9_]+)\[(.+?)\]$/);
+      if (edgeToLabeled) {
+        const from = edgeToLabeled[1];
+        const to = edgeToLabeled[2];
+        const toLabel = edgeToLabeled[3];
+        if (!nodeMap.has(from)) nodeMap.set(from, from);
+        nodeMap.set(to, toLabel);
+        edges.push({ from, to });
+        continue;
+      }
+
+      const edgeFromLabeled = line.match(/^([A-Za-z0-9_]+)\[(.+?)\]\s*-->\s*([A-Za-z0-9_]+)$/);
+      if (edgeFromLabeled) {
+        const from = edgeFromLabeled[1];
+        const fromLabel = edgeFromLabeled[2];
+        const to = edgeFromLabeled[3];
+        nodeMap.set(from, fromLabel);
+        if (!nodeMap.has(to)) nodeMap.set(to, to);
         edges.push({ from, to });
         continue;
       }
@@ -4179,11 +4394,24 @@ const FlowchartDiagramView = memo(function FlowchartDiagramView({ source }: { so
 
   if (parsed.nodes.length === 0) return <pre style={diagramPreviewStyle}>{source}</pre>;
 
-  const rankSpacing = 112;
-  const laneSpacing = 68;
+  const nodeW = 196;
+  const baseNodeH = 72;
+  const lineHeight = 15;
+  const rankSpacing = parsed.direction === "TD" ? 220 : 236;
   const start = 20;
-  const nodeW = 108;
-  const nodeH = 32;
+  const labelMaxChars = 20;
+  const labelMaxLines = 4;
+  const labelLinesByNode = new Map(
+    parsed.nodes.map((n) => [n.id, splitNodeLabel(n.label, labelMaxChars, labelMaxLines)] as const)
+  );
+  const nodeHeightByNode = new Map(
+    parsed.nodes.map((n) => {
+      const lines = labelLinesByNode.get(n.id)?.length ?? 1;
+      return [n.id, Math.max(baseNodeH, lines * lineHeight + 26)] as const;
+    })
+  );
+  const maxNodeHeight = Math.max(baseNodeH, ...Array.from(nodeHeightByNode.values()));
+  const laneSpacing = maxNodeHeight + 24;
 
   const levelMap = new Map<string, number>();
   const indeg = new Map<string, number>();
@@ -4229,14 +4457,15 @@ const FlowchartDiagramView = memo(function FlowchartDiagramView({ source }: { so
   }
 
   const maxLaneCount = Math.max(1, ...Array.from(grouped.values()).map((ids) => ids.length));
-  const rawWidth = parsed.direction === "LR" ? start + (maxLv + 1) * rankSpacing + 96 : start + maxLaneCount * rankSpacing + 96;
+  const rawWidth =
+    parsed.direction === "LR" ? start + (maxLv + 1) * rankSpacing + 96 : start + maxLaneCount * rankSpacing + 96;
   const rawHeight = parsed.direction === "LR" ? start + maxLaneCount * laneSpacing + 92 : start + (maxLv + 1) * laneSpacing + 112;
   const width = Math.max(PREVIEW_MIN_CANVAS_WIDTH, rawWidth);
   const height = Math.max(PREVIEW_MIN_CANVAS_HEIGHT, rawHeight);
 
   return (
     <div style={diagramViewportStyle}>
-      <svg viewBox={`0 0 ${width} ${height}`} style={sequenceSvgStyle}>
+      <svg viewBox={`0 0 ${width} ${height}`} style={diagramSvgStyle}>
         <defs>
           <marker id="flow-arrow-end" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151" />
@@ -4247,19 +4476,26 @@ const FlowchartDiagramView = memo(function FlowchartDiagramView({ source }: { so
           const b = pos.get(e.to);
           if (!a || !b) return null;
           const x1 = a.x + nodeW / 2;
-          const y1 = a.y + nodeH / 2;
+          const y1 = a.y + (nodeHeightByNode.get(e.from) ?? baseNodeH) / 2;
           const x2 = b.x + nodeW / 2;
-          const y2 = b.y + nodeH / 2;
+          const y2 = b.y + (nodeHeightByNode.get(e.to) ?? baseNodeH) / 2;
           return <line key={`${e.from}-${e.to}-${i}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#475569" strokeWidth={1.25} markerEnd="url(#flow-arrow-end)" />;
         })}
         {parsed.nodes.map((n) => {
           const p = pos.get(n.id);
           if (!p) return null;
+          const labelLines = labelLinesByNode.get(n.id) ?? [n.label];
+          const nodeH = nodeHeightByNode.get(n.id) ?? baseNodeH;
+          const firstLineY = p.y + (nodeH - lineHeight * labelLines.length) / 2 + 12;
           return (
             <g key={n.id}>
               <rect x={p.x} y={p.y} width={nodeW} height={nodeH} rx={9} fill="#eef2ff" stroke="#d1d5db" />
-              <text x={p.x + nodeW / 2} y={p.y + 25} textAnchor="middle" style={sequenceLabelStyle}>
-                {n.label.length > 22 ? `${n.label.slice(0, 22)}...` : n.label}
+              <text x={p.x + nodeW / 2} y={firstLineY} textAnchor="middle" style={sequenceLabelStyle}>
+                {labelLines.map((line, idx) => (
+                  <tspan key={`${n.id}-line-${idx}`} x={p.x + nodeW / 2} dy={idx === 0 ? 0 : lineHeight}>
+                    {line}
+                  </tspan>
+                ))}
               </text>
             </g>
           );
@@ -4277,14 +4513,38 @@ const diagramViewportStyle: CSSProperties = {
   overflow: "hidden",
 };
 
-const PREVIEW_MIN_CANVAS_WIDTH = 640;
-const PREVIEW_MIN_CANVAS_HEIGHT = 300;
+const diagramPanelWrapStyle: CSSProperties = {
+  position: "relative",
+};
 
-const sequenceSvgStyle: CSSProperties = {
+const diagramOpenWindowButtonStyle: CSSProperties = {
+  position: "absolute",
+  left: 14,
+  bottom: 14,
+  zIndex: 2,
+  border: "1px solid #d1d5db",
+  borderRadius: 10,
+  background: "#fff",
+  color: "#374151",
+  fontSize: 16,
+  fontWeight: 800,
+  width: 32,
+  height: 32,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  lineHeight: 1,
+  cursor: "pointer",
+};
+
+const PREVIEW_MIN_CANVAS_WIDTH = 640;
+const PREVIEW_MIN_CANVAS_HEIGHT = 460;
+
+const diagramSvgStyle: CSSProperties = {
   display: "block",
   width: "100%",
   height: "auto",
-  minHeight: 220,
+  minHeight: 460,
 };
 
 const sequenceLabelStyle: CSSProperties = {
