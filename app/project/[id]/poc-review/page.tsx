@@ -32,9 +32,18 @@ type ModelOption = {
 
 type SampleInput = {
   id: string;
+  savedId?: string;
   input: string;
   description: string;
 };
+type CsvImportDraft = {
+  headers: string[];
+  rows: string[][];
+};
+type SampleColIndex = 0 | 1;
+type SampleCell = { row: number; col: SampleColIndex };
+type RunColIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+type RunCell = { row: number; col: RunColIndex };
 
 type PocRunRow = {
   key: string;
@@ -66,9 +75,6 @@ const VIEW_TABS: Array<{ key: Step5ViewTab; label: string }> = [
   { key: "operational", label: "운영뷰" },
   { key: "scaleup", label: "확장뷰" },
 ];
-
-const MODEL_PROVIDER_OPTIONS = ["all", "OpenAI", "Anthropic", "Meta", "HuggingFace", "Internal"] as const;
-const MODEL_ROLE_OPTIONS = ["all", "Generation", "Review", "Policy Guard", "Summarization"] as const;
 
 const MOCK_MODEL_OPTIONS: ModelOption[] = [
   {
@@ -156,6 +162,61 @@ function buildDefaultRunRow(modelId: string, sampleId: string): PocRunRow {
   };
 }
 
+function parseClipboardGrid(text: string): string[][] {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => line.split("\t"));
+}
+
+function isMappingHeaderPaste(grid: string[][]) {
+  if (grid.length < 2 || grid[0].length < 2) return false;
+  const keyword = /(input|입력|설명|description|sample|샘플|id|model|모델|output|출력|edit|confidence|error|latency|cost|policy|recall|precision|f1|토큰|비용|응답|정책)/i;
+  return grid[0].some((cell) => keyword.test(cell));
+}
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let current = "";
+  let row: string[] = [];
+  let inQuote = false;
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+  for (let i = 0; i < normalized.length; i += 1) {
+    const ch = normalized[i];
+    const next = normalized[i + 1];
+    if (ch === "\"") {
+      if (inQuote && next === "\"") {
+        current += "\"";
+        i += 1;
+      } else {
+        inQuote = !inQuote;
+      }
+      continue;
+    }
+    if (ch === "," && !inQuote) {
+      row.push(current.trim());
+      current = "";
+      continue;
+    }
+    if (ch === "\n" && !inQuote) {
+      row.push(current.trim());
+      rows.push(row);
+      row = [];
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.length > 0 || row.length > 0) {
+    row.push(current.trim());
+    rows.push(row);
+  }
+  return rows.filter((r) => r.some((cell) => cell !== ""));
+}
+
 function evaluateDecision(metrics: {
   editRate: number;
   confidenceScore: number;
@@ -239,24 +300,24 @@ export default function ProjectPocReviewPage() {
   const twoPaneRef = useRef<HTMLDivElement | null>(null);
 
   const [viewTab, setViewTab] = useState<Step5ViewTab>("experiment");
-  const [modelQuery, setModelQuery] = useState("");
-  const [providerFilter, setProviderFilter] = useState("all");
-  const [roleFilter, setRoleFilter] = useState("all");
-  const [specialtyFilter, setSpecialtyFilter] = useState("all");
-  const [modelCatalog, setModelCatalog] = useState<ModelOption[]>([]);
-  const [isModelLoading, setIsModelLoading] = useState(true);
-  const [modelLoadError, setModelLoadError] = useState<string | null>(null);
-  const [modelLastSyncedAt, setModelLastSyncedAt] = useState<number | null>(null);
-  const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
-  const [activeModelId, setActiveModelId] = useState<string>("");
-  const [releaseMinIdx, setReleaseMinIdx] = useState(0);
-  const [releaseMaxIdx, setReleaseMaxIdx] = useState(0);
+  const [modelCatalog] = useState<ModelOption[]>(MOCK_MODEL_OPTIONS);
+  const [selectedModelIds] = useState<string[]>(() => MOCK_MODEL_OPTIONS.map((model) => model.id));
   const [samples, setSamples] = useState<SampleInput[]>([
-    { id: "S-1", input: "질문 A", description: "기본 검증 샘플" },
-    { id: "S-2", input: "질문 B", description: "정책 검증 샘플" },
+    { id: "tmp-1", input: "질문 A", description: "기본 검증 샘플" },
+    { id: "tmp-2", input: "질문 B", description: "정책 검증 샘플" },
   ]);
   const [runRows, setRunRows] = useState<PocRunRow[]>([]);
   const [message, setMessage] = useState("");
+  const [activeSampleCell, setActiveSampleCell] = useState<SampleCell | null>(null);
+  const [sampleSelectionRange, setSampleSelectionRange] = useState<{ start: SampleCell; end: SampleCell } | null>(null);
+  const [isSelectingSampleCells, setIsSelectingSampleCells] = useState(false);
+  const [activeRunCell, setActiveRunCell] = useState<RunCell | null>(null);
+  const [runSelectionRange, setRunSelectionRange] = useState<{ start: RunCell; end: RunCell } | null>(null);
+  const [isSelectingRunCells, setIsSelectingRunCells] = useState(false);
+  const csvInputRef = useRef<HTMLInputElement | null>(null);
+  const [csvImportDraft, setCsvImportDraft] = useState<CsvImportDraft | null>(null);
+  const [csvInputHeader, setCsvInputHeader] = useState("");
+  const [csvDescriptionHeader, setCsvDescriptionHeader] = useState("");
 
   useEffect(() => {
     if (!id || !locked) return;
@@ -283,27 +344,26 @@ export default function ProjectPocReviewPage() {
     };
   }, [isResizing]);
 
-  const loadModelCatalog = useCallback(async () => {
-    setIsModelLoading(true);
-    setModelLoadError(null);
-    try {
-      // TODO: API 연결 시 이 부분을 실제 fetch로 교체
-      await new Promise((resolve) => setTimeout(resolve, 120));
-      setModelCatalog(MOCK_MODEL_OPTIONS);
-      setModelLastSyncedAt(Date.now());
-      setSelectedModelIds((prev) => (prev.length > 0 ? prev : []));
-    } catch {
-      setModelLoadError("모델 목록을 불러오지 못했습니다.");
-    } finally {
-      setIsModelLoading(false);
+  useEffect(() => {
+    if (!isSelectingSampleCells) return;
+    function onUp() {
+      setIsSelectingSampleCells(false);
     }
-  }, []);
+    window.addEventListener("mouseup", onUp);
+    return () => window.removeEventListener("mouseup", onUp);
+  }, [isSelectingSampleCells]);
 
   useEffect(() => {
-    void loadModelCatalog();
-  }, [loadModelCatalog]);
+    if (!isSelectingRunCells) return;
+    function onUp() {
+      setIsSelectingRunCells(false);
+    }
+    window.addEventListener("mouseup", onUp);
+    return () => window.removeEventListener("mouseup", onUp);
+  }, [isSelectingRunCells]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRunRows((prev) => {
       const sampleIds = samples.map((s) => s.id.trim()).filter(Boolean);
       const prevMap = new Map(prev.map((row) => [row.key, row]));
@@ -322,62 +382,19 @@ export default function ProjectPocReviewPage() {
     if (selectedModelIds.length === 0) return;
     const merged = selectedModelIds.flatMap((modelId) => MODEL_SAMPLE_LIBRARY[modelId] ?? []);
     const dedup = new Map<string, SampleInput>();
-    merged.forEach((sample, idx) => {
-      const key = `${sample.id}::${sample.input}`;
+    merged.forEach((sample) => {
+      const key = `${sample.input}::${sample.description}`;
       if (!dedup.has(key)) {
-        dedup.set(key, { ...sample, id: sample.id || `S-${idx + 1}` });
+        dedup.set(key, { id: `tmp-${dedup.size + 1}`, input: sample.input, description: sample.description });
       }
     });
     const nextSamples = Array.from(dedup.values());
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (nextSamples.length > 0) setSamples(nextSamples);
   }, [selectedModelIds]);
 
-  const releaseDateOptions = useMemo(() => {
-    return Array.from(new Set(modelCatalog.map((model) => model.releaseDate))).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-  }, [modelCatalog]);
-
-  useEffect(() => {
-    if (releaseDateOptions.length === 0) {
-      setReleaseMinIdx(0);
-      setReleaseMaxIdx(0);
-      return;
-    }
-    setReleaseMinIdx(0);
-    setReleaseMaxIdx(releaseDateOptions.length - 1);
-  }, [releaseDateOptions]);
-
-  const specialtyOptions = useMemo(() => ["all", ...Array.from(new Set(modelCatalog.map((m) => m.specialty)))], [modelCatalog]);
-
-  const filteredModels = useMemo(() => {
-    const q = modelQuery.trim().toLowerCase();
-    const minDate = releaseDateOptions[releaseMinIdx];
-    const maxDate = releaseDateOptions[releaseMaxIdx];
-    return modelCatalog.filter((model) => {
-      if (providerFilter !== "all" && model.provider !== providerFilter) return false;
-      if (roleFilter !== "all" && model.role !== roleFilter) return false;
-      if (specialtyFilter !== "all" && model.specialty !== specialtyFilter) return false;
-      if (minDate && maxDate) {
-        const current = new Date(model.releaseDate).getTime();
-        const min = new Date(minDate).getTime();
-        const max = new Date(maxDate).getTime();
-        if (current < min || current > max) return false;
-      }
-      if (!q) return true;
-      const haystack = `${model.name} ${model.provider} ${model.role} ${model.version} ${model.releaseDate} ${model.specialty} ${model.domain}`.toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [modelCatalog, modelQuery, providerFilter, releaseDateOptions, releaseMaxIdx, releaseMinIdx, roleFilter, specialtyFilter]);
-
-  const selectedModels = useMemo(
-    () => modelCatalog.filter((model) => selectedModelIds.includes(model.id)),
-    [modelCatalog, selectedModelIds]
-  );
-  const activeModel = useMemo(() => {
-    const fallbackId = activeModelId || selectedModelIds[0] || "";
-    return modelCatalog.find((model) => model.id === fallbackId) ?? null;
-  }, [activeModelId, modelCatalog, selectedModelIds]);
-
   const sampleMap = useMemo(() => new Map(samples.map((sample) => [sample.id, sample])), [samples]);
+  const sampleDisplayMap = useMemo(() => new Map(samples.map((sample, idx) => [sample.id, sample.savedId || `임시-${idx + 1}`])), [samples]);
   const modelMap = useMemo(() => new Map(modelCatalog.map((model) => [model.id, model])), [modelCatalog]);
 
   const core10ByModel = useMemo(() => {
@@ -414,7 +431,7 @@ export default function ProjectPocReviewPage() {
           const model = modelMap.get(row.modelId)?.name ?? row.modelId;
           const sample = sampleMap.get(row.sampleId);
           return [
-            row.sampleId,
+            sampleDisplayMap.get(row.sampleId) ?? row.sampleId,
             model,
             sample?.input || "-",
             row.predictedOutput || "-",
@@ -433,7 +450,7 @@ export default function ProjectPocReviewPage() {
         rows: runRows.map((row) => {
           const model = modelMap.get(row.modelId)?.name ?? row.modelId;
           return [
-            row.sampleId,
+            sampleDisplayMap.get(row.sampleId) ?? row.sampleId,
             model,
             `${row.policyPassRate.toFixed(1)}%`,
             `${row.policyViolationRate.toFixed(1)}%`,
@@ -479,7 +496,7 @@ export default function ProjectPocReviewPage() {
         });
       }),
     };
-  }, [core10ByModel, modelMap, runRows, sampleMap, viewTab]);
+  }, [core10ByModel, modelMap, runRows, sampleDisplayMap, sampleMap, viewTab]);
 
   const summaryMetrics = useMemo(() => {
     const safeDiv = (value: number, denominator: number) => (denominator > 0 ? value / denominator : 0);
@@ -518,9 +535,6 @@ export default function ProjectPocReviewPage() {
     const completionRate = Math.max(0, Math.min(100, 100 - avgErrorRate * 2 - avgEditRate * 0.3));
     const dropoffRate = Math.max(0, Math.min(100, avgErrorRate + Math.max(0, 1 - avgConfidence) * 10));
     const conversionRate = Math.max(0, Math.min(100, completionRate * 0.16));
-    const nps = Math.max(-100, Math.min(100, Math.round((avgConfidence - 0.5) * 80 + (completionRate - dropoffRate) * 0.2)));
-    const productivityGain = Math.max(0, Math.min(100, Math.round((completionRate * 0.2 + avgRecall * 100 * 0.1) * 10) / 10));
-
     return {
       sampleCount: runRows.length,
       tokenUsage,
@@ -547,8 +561,6 @@ export default function ProjectPocReviewPage() {
       completionRate,
       dropoffRate,
       conversionRate,
-      nps,
-      productivityGain,
     };
   }, [runRows]);
 
@@ -556,25 +568,157 @@ export default function ProjectPocReviewPage() {
     setSamples((prev) => prev.map((sample, i) => (i === index ? { ...sample, [key]: value } : sample)));
   }
 
-  function addSample() {
-    setSamples((prev) => [...prev, { id: `S-${prev.length + 1}`, input: "", description: "" }]);
+  function isActiveSampleCell(row: number, col: SampleColIndex) {
+    return activeSampleCell?.row === row && activeSampleCell?.col === col;
   }
 
-  function addModel(modelId: string) {
-    setSelectedModelIds((prev) => {
-      if (prev.includes(modelId)) return prev;
-      const next = [...prev, modelId];
-      if (!activeModelId) setActiveModelId(modelId);
+  function startSampleCellSelection(row: number, col: SampleColIndex) {
+    const cell = { row, col };
+    setActiveSampleCell(cell);
+    setSampleSelectionRange({ start: cell, end: cell });
+    setIsSelectingSampleCells(true);
+  }
+
+  function extendSampleCellSelection(row: number, col: SampleColIndex) {
+    if (!isSelectingSampleCells || !sampleSelectionRange) return;
+    setSampleSelectionRange((prev) => (prev ? { start: prev.start, end: { row, col } } : prev));
+  }
+
+  function isSampleCellInSelection(row: number, col: SampleColIndex) {
+    if (!sampleSelectionRange) return false;
+    const rowMin = Math.min(sampleSelectionRange.start.row, sampleSelectionRange.end.row);
+    const rowMax = Math.max(sampleSelectionRange.start.row, sampleSelectionRange.end.row);
+    const colMin = Math.min(sampleSelectionRange.start.col, sampleSelectionRange.end.col);
+    const colMax = Math.max(sampleSelectionRange.start.col, sampleSelectionRange.end.col);
+    return row >= rowMin && row <= rowMax && col >= colMin && col <= colMax;
+  }
+
+  function clearSelectedSampleCells() {
+    if (!sampleSelectionRange) return;
+    const rowMin = Math.min(sampleSelectionRange.start.row, sampleSelectionRange.end.row);
+    const rowMax = Math.max(sampleSelectionRange.start.row, sampleSelectionRange.end.row);
+    const colMin = Math.min(sampleSelectionRange.start.col, sampleSelectionRange.end.col);
+    const colMax = Math.max(sampleSelectionRange.start.col, sampleSelectionRange.end.col);
+    setSamples((prev) =>
+      prev.map((sample, rowIndex) => {
+        if (rowIndex < rowMin || rowIndex > rowMax) return sample;
+        const next = { ...sample };
+        for (let col = colMin; col <= colMax; col += 1) {
+          if (col === 0) next.input = "";
+          if (col === 1) next.description = "";
+        }
+        return next;
+      })
+    );
+  }
+
+  function handleSampleSheetKeyDownCapture(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (!sampleSelectionRange) return;
+    if (e.key !== "Backspace" && e.key !== "Delete") return;
+    e.preventDefault();
+    clearSelectedSampleCells();
+  }
+
+  function handleSampleSheetPaste(startRow: number, startCol: SampleColIndex, e: React.ClipboardEvent<HTMLInputElement>) {
+    const text = e.clipboardData.getData("text/plain");
+    const grid = parseClipboardGrid(text);
+    if (grid.length === 0) return;
+    if (startRow === 0 && startCol === 0 && isMappingHeaderPaste(grid)) {
+      e.preventDefault();
+      const [headers, ...rows] = grid;
+      const inputHeader = guessHeader(headers, [/input/, /질문/, /요청/, /prompt/, /text/]);
+      const descriptionHeader = guessHeader(headers, [/desc/, /설명/, /note/, /context/, /label/]);
+      setCsvImportDraft({ headers, rows });
+      setCsvInputHeader(inputHeader);
+      setCsvDescriptionHeader(descriptionHeader);
+      setMessage(`표 붙여넣기 인식: ${rows.length}개 행을 불러왔어요. 컬럼 매핑 후 적용하세요.`);
+      return;
+    }
+    e.preventDefault();
+    const colKeys: Array<keyof SampleInput> = ["input", "description"];
+    setSamples((prev) => {
+      const next = [...prev];
+      const requiredRows = startRow + grid.length;
+      while (next.length < requiredRows) {
+        next.push({ id: `S-${next.length + 1}`, input: "", description: "" });
+      }
+      for (let r = 0; r < grid.length; r += 1) {
+        const rowIndex = startRow + r;
+        const row = { ...next[rowIndex] };
+        for (let c = 0; c < grid[r].length; c += 1) {
+          const colIndex = startCol + c;
+          if (colIndex > 1) break;
+          row[colKeys[colIndex]] = grid[r][c];
+        }
+        next[rowIndex] = row;
+      }
       return next;
     });
   }
 
-  function removeModel(modelId: string) {
-    setSelectedModelIds((prev) => {
-      const next = prev.filter((idValue) => idValue !== modelId);
-      if (activeModelId === modelId) setActiveModelId(next[0] ?? "");
-      return next;
-    });
+  function openCsvUpload() {
+    csvInputRef.current?.click();
+  }
+
+  function guessHeader(headers: string[], patterns: RegExp[]) {
+    const normalized = headers.map((header) => header.trim().toLowerCase());
+    const idx = normalized.findIndex((value) => patterns.some((re) => re.test(value)));
+    return idx >= 0 ? headers[idx] : headers[0] || "";
+  }
+
+  function handleCsvUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = String(reader.result ?? "");
+      const parsed = parseCsv(raw);
+      if (parsed.length < 2) {
+        setMessage("CSV 데이터가 부족합니다. 헤더 + 1개 이상 데이터가 필요해요.");
+        return;
+      }
+      const [headers, ...rows] = parsed;
+      const inputHeader = guessHeader(headers, [/input/, /질문/, /요청/, /prompt/, /text/]);
+      const descriptionHeader = guessHeader(headers, [/desc/, /설명/, /note/, /context/, /label/]);
+      setCsvImportDraft({ headers, rows });
+      setCsvInputHeader(inputHeader);
+      setCsvDescriptionHeader(descriptionHeader);
+      setMessage(`CSV 업로드 완료: ${rows.length}개 행을 불러왔어요. 컬럼 매핑 후 적용하세요.`);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  function applyCsvMapping() {
+    if (!csvImportDraft) return;
+    const inputIndex = csvImportDraft.headers.indexOf(csvInputHeader);
+    const descriptionIndex = csvImportDraft.headers.indexOf(csvDescriptionHeader);
+    if (inputIndex < 0 || descriptionIndex < 0) {
+      setMessage("입력/설명 컬럼 매핑을 확인해 주세요.");
+      return;
+    }
+    const mapped = csvImportDraft.rows
+      .map((row, idx) => ({
+        id: `tmp-${idx + 1}`,
+        input: row[inputIndex] ?? "",
+        description: row[descriptionIndex] ?? "",
+      }))
+      .filter((row) => row.input.trim() || row.description.trim());
+    if (mapped.length === 0) {
+      setMessage("매핑된 데이터가 비어 있어요. 컬럼 선택을 바꿔보세요.");
+      return;
+    }
+    setSamples(mapped);
+    setActiveSampleCell(null);
+    setSampleSelectionRange(null);
+    setCsvImportDraft(null);
+    setMessage(`CSV 매핑 적용 완료: 샘플 ${mapped.length}개로 업데이트했어요.`);
+  }
+
+  function cancelCsvMapping() {
+    setCsvImportDraft(null);
+    setCsvInputHeader("");
+    setCsvDescriptionHeader("");
   }
 
   function updateRunRow(key: string, field: keyof PocRunRow, value: string) {
@@ -590,41 +734,110 @@ export default function ProjectPocReviewPage() {
     );
   }
 
-  function handlePredict() {
-    setRunRows((prev) =>
-      prev.map((row) => {
-        const model = modelMap.get(row.modelId);
-        const sample = sampleMap.get(row.sampleId);
-        return {
-          ...row,
-          predictedOutput: row.predictedOutput || `[예상] ${model?.name ?? row.modelId}: ${sample?.input || "입력 없음"}`,
-          confidenceScore: row.confidenceScore || 0.82,
-          averageLatency: row.averageLatency || 1100,
-          costPerRequest: row.costPerRequest || 0.03,
-          policyPassRate: row.policyPassRate || 96,
-          policyViolationRate: row.policyViolationRate || 4,
-          errorRate: row.errorRate || 3,
-          editRate: row.editRate || 12,
-          recall: row.recall || 0.72,
-          precision: row.precision || 0.76,
-          f1Score: row.f1Score || 0.74,
-        };
-      })
-    );
-    setMessage("예상 결과를 생성했습니다.");
+  const runColKeys: Array<keyof PocRunRow> = [
+    "observedOutput",
+    "editRate",
+    "confidenceScore",
+    "errorRate",
+    "averageLatency",
+    "costPerRequest",
+    "policyPassRate",
+    "policyViolationRate",
+    "recall",
+    "precision",
+    "f1Score",
+  ];
+
+  function isRunNumericField(field: keyof PocRunRow) {
+    return field !== "observedOutput";
   }
 
-  function handleRunPoc() {
+  function isActiveRunCell(row: number, col: RunColIndex) {
+    return activeRunCell?.row === row && activeRunCell?.col === col;
+  }
+
+  function startRunCellSelection(row: number, col: RunColIndex) {
+    const cell = { row, col };
+    setActiveRunCell(cell);
+    setRunSelectionRange({ start: cell, end: cell });
+    setIsSelectingRunCells(true);
+  }
+
+  function extendRunCellSelection(row: number, col: RunColIndex) {
+    if (!isSelectingRunCells || !runSelectionRange) return;
+    setRunSelectionRange((prev) => (prev ? { start: prev.start, end: { row, col } } : prev));
+  }
+
+  function isRunCellInSelection(row: number, col: RunColIndex) {
+    if (!runSelectionRange) return false;
+    const rowMin = Math.min(runSelectionRange.start.row, runSelectionRange.end.row);
+    const rowMax = Math.max(runSelectionRange.start.row, runSelectionRange.end.row);
+    const colMin = Math.min(runSelectionRange.start.col, runSelectionRange.end.col);
+    const colMax = Math.max(runSelectionRange.start.col, runSelectionRange.end.col);
+    return row >= rowMin && row <= rowMax && col >= colMin && col <= colMax;
+  }
+
+  function clearSelectedRunCells() {
+    if (!runSelectionRange) return;
+    const rowMin = Math.min(runSelectionRange.start.row, runSelectionRange.end.row);
+    const rowMax = Math.max(runSelectionRange.start.row, runSelectionRange.end.row);
+    const colMin = Math.min(runSelectionRange.start.col, runSelectionRange.end.col);
+    const colMax = Math.max(runSelectionRange.start.col, runSelectionRange.end.col);
     setRunRows((prev) =>
-      prev.map((row) => ({
-        ...row,
-        observedOutput: row.observedOutput || `${row.predictedOutput || "예상 출력"} (실측)` ,
-      }))
+      prev.map((row, rowIndex) => {
+        if (rowIndex < rowMin || rowIndex > rowMax) return row;
+        const next = { ...row };
+        for (let col = colMin; col <= colMax; col += 1) {
+          const field = runColKeys[col as RunColIndex];
+          if (isRunNumericField(field)) {
+            next[field] = 0 as never;
+          } else {
+            next[field] = "" as never;
+          }
+        }
+        return next;
+      })
     );
-    setMessage("POC 실측 입력 모드로 전환되었습니다.");
+  }
+
+  function handleRunSheetKeyDownCapture(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (!runSelectionRange) return;
+    if (e.key !== "Backspace" && e.key !== "Delete") return;
+    e.preventDefault();
+    clearSelectedRunCells();
+  }
+
+  function handleRunSheetPaste(startRow: number, startCol: RunColIndex, e: React.ClipboardEvent<HTMLInputElement>) {
+    const text = e.clipboardData.getData("text/plain");
+    const grid = parseClipboardGrid(text);
+    if (grid.length === 0) return;
+    e.preventDefault();
+    setRunRows((prev) => {
+      const next = [...prev];
+      for (let r = 0; r < grid.length; r += 1) {
+        const rowIndex = startRow + r;
+        if (rowIndex >= next.length) break;
+        const row = { ...next[rowIndex] };
+        for (let c = 0; c < grid[r].length; c += 1) {
+          const colIndex = startCol + c;
+          if (colIndex > 10) break;
+          const field = runColKeys[colIndex as RunColIndex];
+          const raw = grid[r][c];
+          if (isRunNumericField(field)) {
+            const numeric = Number(raw);
+            row[field] = (Number.isFinite(numeric) ? numeric : 0) as never;
+          } else {
+            row[field] = raw as never;
+          }
+        }
+        next[rowIndex] = row;
+      }
+      return next;
+    });
   }
 
   function handleSavePoc() {
+    setSamples((prev) => prev.map((sample, idx) => ({ ...sample, savedId: `S-${idx + 1}` })));
     setMessage(`결과 저장 완료: 모델 ${selectedModelIds.length}개 / 샘플 ${samples.length}개`);
   }
 
@@ -634,122 +847,6 @@ export default function ProjectPocReviewPage() {
         <div style={heroStyle}>
           <h1 style={titleStyle}>STEP 5 PoC 리뷰</h1>
           <p style={{ ...subtleStyle, marginTop: 6 }}>샘플셋 입력 → 예측 → 실측 입력 → Core10 비교 → Go/Stop 결정</p>
-        </div>
-
-        <div style={{ ...cardStyle, marginTop: 12 }}>
-          <div style={cardHeadStyle}>
-            <div>
-              <h3 style={cardTitleStyle}>모델 검색/선택</h3>
-              <div style={cardSubStyle}>
-                {modelLoadError
-                  ? "동기화 실패"
-                  : isModelLoading
-                    ? "동기화 중..."
-                    : `동기화 완료${modelLastSyncedAt ? ` · ${new Date(modelLastSyncedAt).toLocaleTimeString()}` : ""}`}
-              </div>
-            </div>
-            <button type="button" onClick={() => void loadModelCatalog()} style={miniButtonStyle} disabled={isModelLoading}>
-              새로고침
-            </button>
-          </div>
-          <div style={topSearchWrapStyle}>
-            <input
-              value={modelQuery}
-              onChange={(e) => setModelQuery(e.target.value)}
-              placeholder="모델명/버전 검색"
-              style={topSearchInputStyle}
-            />
-          </div>
-          <div style={topFilterGridStyle}>
-            <div style={topFilterItemStyle}>
-              <label style={topFilterLabelStyle}>Provider</label>
-              <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)} style={selectStyle}>
-                {MODEL_PROVIDER_OPTIONS.map((provider) => (
-                  <option key={provider} value={provider}>
-                    {provider === "all" ? "전체" : provider}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div style={topFilterItemStyle}>
-              <label style={topFilterLabelStyle}>Role</label>
-              <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} style={selectStyle}>
-                {MODEL_ROLE_OPTIONS.map((role) => (
-                  <option key={role} value={role}>
-                    {role === "all" ? "전체" : role}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div style={topFilterItemStyle}>
-              <label style={topFilterLabelStyle}>Specialty</label>
-              <select value={specialtyFilter} onChange={(e) => setSpecialtyFilter(e.target.value)} style={selectStyle}>
-                {specialtyOptions.map((specialty) => (
-                  <option key={specialty} value={specialty}>
-                    {specialty === "all" ? "전체" : specialty}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div style={topFilterItemStyle}>
-              <label style={topFilterLabelStyle}>출시일 범위</label>
-              {releaseDateOptions.length > 0 ? (
-                <div style={rangeWrapStyle}>
-                  <div style={rangeLabelStyle}>
-                    {releaseDateOptions[releaseMinIdx]} ~ {releaseDateOptions[releaseMaxIdx]}
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={releaseDateOptions.length - 1}
-                    value={releaseMinIdx}
-                    onChange={(e) => {
-                      const next = Number(e.target.value);
-                      setReleaseMinIdx(Math.min(next, releaseMaxIdx));
-                    }}
-                  />
-                  <input
-                    type="range"
-                    min={0}
-                    max={releaseDateOptions.length - 1}
-                    value={releaseMaxIdx}
-                    onChange={(e) => {
-                      const next = Number(e.target.value);
-                      setReleaseMaxIdx(Math.max(next, releaseMinIdx));
-                    }}
-                  />
-                </div>
-              ) : (
-                <div style={cardSubStyle}>-</div>
-              )}
-            </div>
-          </div>
-          <div style={{ ...cardSubStyle, marginTop: 8 }}>검색 결과에서 모델을 추가하세요.</div>
-          <div style={modelListStyle}>
-            {isModelLoading && <div style={emptyStateStyle}>모델 목록을 불러오는 중입니다...</div>}
-            {!isModelLoading && modelLoadError && <div style={errorStateStyle}>{modelLoadError}</div>}
-            {!isModelLoading && !modelLoadError && modelQuery.trim() === "" && <div style={emptyStateStyle}>검색어를 입력하면 모델을 선택할 수 있습니다.</div>}
-            {!isModelLoading && !modelLoadError && modelQuery.trim() !== "" && filteredModels.length === 0 && (
-              <div style={emptyStateStyle}>조건에 맞는 모델이 없습니다.</div>
-            )}
-            {!isModelLoading &&
-              !modelLoadError &&
-              modelQuery.trim() !== "" &&
-              filteredModels.map((model) => {
-                const selected = selectedModelIds.includes(model.id);
-                return (
-                  <div key={model.id} style={modelItemStyle}>
-                    <span style={{ flex: 1 }}>
-                      <strong>{model.name}</strong>
-                      <span style={modelMetaStyle}> {model.provider} · {model.role} · {model.version}</span>
-                    </span>
-                    <button type="button" onClick={() => addModel(model.id)} style={modelDetailButtonStyle} disabled={selected}>
-                      {selected ? "선택됨" : "추가"}
-                    </button>
-                  </div>
-                );
-              })}
-          </div>
         </div>
 
         <div style={kpiCardsStyle}>
@@ -767,82 +864,59 @@ export default function ProjectPocReviewPage() {
           </div>
         </div>
 
-        <div style={cardStyle}>
-          <h3 style={cardTitleStyle}>선택된 모델 정보</h3>
-          <div style={selectedCardWrapStyle}>
-            {selectedModels.map((model) => (
-              <div key={model.id} style={{ ...selectedInfoCardStyle, ...(activeModelId === model.id ? selectedInfoCardActiveStyle : {}) }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <button type="button" onClick={() => setActiveModelId(model.id)} style={selectedCardMainButtonStyle}>
-                    <div style={{ fontWeight: 800 }}>{model.name}</div>
-                    <div style={modelMetaStyle}>
-                      {model.provider} · {model.version}
-                    </div>
-                  </button>
-                  <button type="button" onClick={() => removeModel(model.id)} style={selectedCardRemoveStyle} title="삭제">
-                    ×
-                  </button>
-                </div>
-                <div style={modelDetailGridStyle}>
-                  <div style={modelDetailRowStyle}>
-                    <span style={modelDetailKeyStyle}>출시일</span>
-                    <span style={modelDetailValStyle}>{model.releaseDate}</span>
-                  </div>
-                  <div style={modelDetailRowStyle}>
-                    <span style={modelDetailKeyStyle}>역할</span>
-                    <span style={modelDetailValStyle}>{model.role}</span>
-                  </div>
-                  <div style={modelDetailRowStyle}>
-                    <span style={modelDetailKeyStyle}>특화</span>
-                    <span style={modelDetailValStyle}>{model.specialty}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-          {selectedModels.length === 0 && <div style={{ ...emptyStateStyle, marginTop: 8 }}>선택된 모델이 없습니다.</div>}
-          {activeModel && (
-            <div style={modelDetailPanelStyle}>
-              <div style={modelDetailTitleStyle}>{activeModel.name}</div>
-              <div style={modelDetailGridStyle}>
-                <div style={modelDetailRowStyle}>
-                  <span style={modelDetailKeyStyle}>회사</span>
-                  <span style={modelDetailValStyle}>{activeModel.provider}</span>
-                </div>
-                <div style={modelDetailRowStyle}>
-                  <span style={modelDetailKeyStyle}>버전</span>
-                  <span style={modelDetailValStyle}>{activeModel.version}</span>
-                </div>
-                <div style={modelDetailRowStyle}>
-                  <span style={modelDetailKeyStyle}>출시일</span>
-                  <span style={modelDetailValStyle}>{activeModel.releaseDate}</span>
-                </div>
-                <div style={modelDetailRowStyle}>
-                  <span style={modelDetailKeyStyle}>역할</span>
-                  <span style={modelDetailValStyle}>{activeModel.role}</span>
-                </div>
-                <div style={modelDetailRowStyle}>
-                  <span style={modelDetailKeyStyle}>특화 분야</span>
-                  <span style={modelDetailValStyle}>{activeModel.specialty}</span>
-                </div>
-                <div style={modelDetailRowStyle}>
-                  <span style={modelDetailKeyStyle}>적용 도메인</span>
-                  <span style={modelDetailValStyle}>{activeModel.domain}</span>
-                </div>
-              </div>
-              <p style={{ ...subtleStyle, marginTop: 6 }}>{activeModel.summary}</p>
-            </div>
-          )}
-        </div>
-
         <div className="step5-left-grid" style={leftGridStyle}>
           <div style={{ ...cardStyle, minWidth: 0 }}>
-            <h3 style={cardTitleStyle}>샘플셋 입력</h3>
-            <div style={tableWrapStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <h3 style={{ ...cardTitleStyle, margin: 0 }}>샘플셋 입력</h3>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input ref={csvInputRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={handleCsvUpload} />
+                <button type="button" onClick={openCsvUpload} style={ghostButtonStyle}>
+                  CSV 업로드
+                </button>
+                <button type="button" onClick={handleSavePoc} style={buttonStyle}>
+                  결과 저장
+                </button>
+              </div>
+            </div>
+            {csvImportDraft && (
+              <div style={mappingBoxStyle}>
+                <div style={mappingTitleStyle}>CSV 컬럼 매핑</div>
+                <div style={mappingRowStyle}>
+                  <label style={mappingLabelStyle}>
+                    입력 (Input)
+                    <select value={csvInputHeader} onChange={(e) => setCsvInputHeader(e.target.value)} style={mappingSelectStyle}>
+                      {csvImportDraft.headers.map((header) => (
+                        <option key={`input-${header}`} value={header}>
+                          {header}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={mappingLabelStyle}>
+                    설명
+                    <select value={csvDescriptionHeader} onChange={(e) => setCsvDescriptionHeader(e.target.value)} style={mappingSelectStyle}>
+                      {csvImportDraft.headers.map((header) => (
+                        <option key={`desc-${header}`} value={header}>
+                          {header}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div style={mappingActionsStyle}>
+                    <button type="button" onClick={applyCsvMapping} style={buttonStyle}>
+                      매핑 적용
+                    </button>
+                    <button type="button" onClick={cancelCsvMapping} style={ghostButtonStyle}>
+                      취소
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div style={tableWrapStyle} onKeyDownCapture={handleSampleSheetKeyDownCapture}>
               <table style={tableStyle}>
                 <thead>
                   <tr>
-                    <th style={thStyle}>샘플 ID</th>
                     <th style={thStyle}>입력 (Input)</th>
                     <th style={thStyle}>설명</th>
                   </tr>
@@ -850,36 +924,272 @@ export default function ProjectPocReviewPage() {
                 <tbody>
                   {samples.map((sample, index) => (
                     <tr key={`sample-${index}`}>
-                      <td style={tdStyle}>
-                        <input value={sample.id} onChange={(e) => updateSample(index, "id", e.target.value)} style={cellInputStyle} />
+                      <td
+                        style={{ ...tdStyle, ...(isSampleCellInSelection(index, 0) ? sheetCellSelectedStyle : {}), ...(isActiveSampleCell(index, 0) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startSampleCellSelection(index, 0)}
+                        onMouseEnter={() => extendSampleCellSelection(index, 0)}
+                      >
+                        <input
+                          value={sample.input}
+                          onChange={(e) => updateSample(index, "input", e.target.value)}
+                          onPaste={(e) => handleSampleSheetPaste(index, 0, e)}
+                          onFocus={() => {
+                            setActiveSampleCell({ row: index, col: 0 });
+                            setSampleSelectionRange({ start: { row: index, col: 0 }, end: { row: index, col: 0 } });
+                          }}
+                          onMouseDown={() => startSampleCellSelection(index, 0)}
+                          style={sheetCellInputStyle}
+                        />
                       </td>
-                      <td style={tdStyle}>
-                        <input value={sample.input} onChange={(e) => updateSample(index, "input", e.target.value)} style={cellInputStyle} />
-                      </td>
-                      <td style={tdStyle}>
-                        <input value={sample.description} onChange={(e) => updateSample(index, "description", e.target.value)} style={cellInputStyle} />
+                      <td
+                        style={{ ...tdStyle, ...(isSampleCellInSelection(index, 1) ? sheetCellSelectedStyle : {}), ...(isActiveSampleCell(index, 1) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startSampleCellSelection(index, 1)}
+                        onMouseEnter={() => extendSampleCellSelection(index, 1)}
+                      >
+                        <input
+                          value={sample.description}
+                          onChange={(e) => updateSample(index, "description", e.target.value)}
+                          onPaste={(e) => handleSampleSheetPaste(index, 1, e)}
+                          onFocus={() => {
+                            setActiveSampleCell({ row: index, col: 1 });
+                            setSampleSelectionRange({ start: { row: index, col: 1 }, end: { row: index, col: 1 } });
+                          }}
+                          onMouseDown={() => startSampleCellSelection(index, 1)}
+                          style={sheetCellInputStyle}
+                        />
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <button type="button" onClick={addSample} style={ghostButtonStyle}>
-              + 샘플 추가
-            </button>
           </div>
         </div>
 
-        <div style={actionBarStyle}>
-          <button type="button" onClick={handlePredict} style={primaryButtonStyle}>
-            예상 출력 생성
-          </button>
-          <button type="button" onClick={handleRunPoc} style={buttonStyle}>
-            POC 실행
-          </button>
-          <button type="button" onClick={handleSavePoc} style={buttonStyle}>
-            결과 저장
-          </button>
+        <div style={cardStyle}>
+          <h3 style={cardTitleStyle}>모델 × 샘플 결과</h3>
+          <div style={tableWrapStyle} onKeyDownCapture={handleRunSheetKeyDownCapture}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>모델</th>
+                  <th style={thStyle}>샘플</th>
+                  <th style={thStyle}>입력</th>
+                  <th style={thStyle}>출력 (Output)</th>
+                  <th style={thStyle}>수정 비율 (Edit Rate)</th>
+                  <th style={thStyle}>평균 컨피던스 (Confidence Score)</th>
+                  <th style={thStyle}>오류율 (Error Rate)</th>
+                  <th style={thStyle}>평균 응답 시간 (Average Latency)</th>
+                  <th style={thStyle}>요청당 비용 (Cost per Request)</th>
+                  <th style={thStyle}>정책 통과율 (Policy Pass Rate)</th>
+                  <th style={thStyle}>정책 위반율 (Policy Violation Rate)</th>
+                  <th style={thStyle}>전체 재현율 (Recall)</th>
+                  <th style={thStyle}>전체 정밀도 (Precision)</th>
+                  <th style={thStyle}>전체 F1 점수 (F1 Score)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runRows.map((row, rowIndex) => {
+                  const model = modelMap.get(row.modelId);
+                  const sample = sampleMap.get(row.sampleId);
+                  return (
+                    <tr key={row.key}>
+                      <td style={tdStyle}>{model?.name ?? row.modelId}</td>
+                      <td style={tdStyle}>{sampleDisplayMap.get(row.sampleId) ?? row.sampleId}</td>
+                      <td style={tdStyle}>{sample?.input || "-"}</td>
+                      <td
+                        style={{ ...tdStyle, ...(isRunCellInSelection(rowIndex, 0) ? sheetCellSelectedStyle : {}), ...(isActiveRunCell(rowIndex, 0) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startRunCellSelection(rowIndex, 0)}
+                        onMouseEnter={() => extendRunCellSelection(rowIndex, 0)}
+                      >
+                        <input
+                          value={row.observedOutput}
+                          onChange={(e) => updateRunRow(row.key, "observedOutput", e.target.value)}
+                          onPaste={(e) => handleRunSheetPaste(rowIndex, 0, e)}
+                          onFocus={() => {
+                            setActiveRunCell({ row: rowIndex, col: 0 });
+                            setRunSelectionRange({ start: { row: rowIndex, col: 0 }, end: { row: rowIndex, col: 0 } });
+                          }}
+                          onMouseDown={() => startRunCellSelection(rowIndex, 0)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isRunCellInSelection(rowIndex, 1) ? sheetCellSelectedStyle : {}), ...(isActiveRunCell(rowIndex, 1) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startRunCellSelection(rowIndex, 1)}
+                        onMouseEnter={() => extendRunCellSelection(rowIndex, 1)}
+                      >
+                        <input
+                          value={row.editRate}
+                          onChange={(e) => updateRunRow(row.key, "editRate", e.target.value)}
+                          onPaste={(e) => handleRunSheetPaste(rowIndex, 1, e)}
+                          onFocus={() => {
+                            setActiveRunCell({ row: rowIndex, col: 1 });
+                            setRunSelectionRange({ start: { row: rowIndex, col: 1 }, end: { row: rowIndex, col: 1 } });
+                          }}
+                          onMouseDown={() => startRunCellSelection(rowIndex, 1)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isRunCellInSelection(rowIndex, 2) ? sheetCellSelectedStyle : {}), ...(isActiveRunCell(rowIndex, 2) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startRunCellSelection(rowIndex, 2)}
+                        onMouseEnter={() => extendRunCellSelection(rowIndex, 2)}
+                      >
+                        <input
+                          value={row.confidenceScore}
+                          onChange={(e) => updateRunRow(row.key, "confidenceScore", e.target.value)}
+                          onPaste={(e) => handleRunSheetPaste(rowIndex, 2, e)}
+                          onFocus={() => {
+                            setActiveRunCell({ row: rowIndex, col: 2 });
+                            setRunSelectionRange({ start: { row: rowIndex, col: 2 }, end: { row: rowIndex, col: 2 } });
+                          }}
+                          onMouseDown={() => startRunCellSelection(rowIndex, 2)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isRunCellInSelection(rowIndex, 3) ? sheetCellSelectedStyle : {}), ...(isActiveRunCell(rowIndex, 3) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startRunCellSelection(rowIndex, 3)}
+                        onMouseEnter={() => extendRunCellSelection(rowIndex, 3)}
+                      >
+                        <input
+                          value={row.errorRate}
+                          onChange={(e) => updateRunRow(row.key, "errorRate", e.target.value)}
+                          onPaste={(e) => handleRunSheetPaste(rowIndex, 3, e)}
+                          onFocus={() => {
+                            setActiveRunCell({ row: rowIndex, col: 3 });
+                            setRunSelectionRange({ start: { row: rowIndex, col: 3 }, end: { row: rowIndex, col: 3 } });
+                          }}
+                          onMouseDown={() => startRunCellSelection(rowIndex, 3)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isRunCellInSelection(rowIndex, 4) ? sheetCellSelectedStyle : {}), ...(isActiveRunCell(rowIndex, 4) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startRunCellSelection(rowIndex, 4)}
+                        onMouseEnter={() => extendRunCellSelection(rowIndex, 4)}
+                      >
+                        <input
+                          value={row.averageLatency}
+                          onChange={(e) => updateRunRow(row.key, "averageLatency", e.target.value)}
+                          onPaste={(e) => handleRunSheetPaste(rowIndex, 4, e)}
+                          onFocus={() => {
+                            setActiveRunCell({ row: rowIndex, col: 4 });
+                            setRunSelectionRange({ start: { row: rowIndex, col: 4 }, end: { row: rowIndex, col: 4 } });
+                          }}
+                          onMouseDown={() => startRunCellSelection(rowIndex, 4)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isRunCellInSelection(rowIndex, 5) ? sheetCellSelectedStyle : {}), ...(isActiveRunCell(rowIndex, 5) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startRunCellSelection(rowIndex, 5)}
+                        onMouseEnter={() => extendRunCellSelection(rowIndex, 5)}
+                      >
+                        <input
+                          value={row.costPerRequest}
+                          onChange={(e) => updateRunRow(row.key, "costPerRequest", e.target.value)}
+                          onPaste={(e) => handleRunSheetPaste(rowIndex, 5, e)}
+                          onFocus={() => {
+                            setActiveRunCell({ row: rowIndex, col: 5 });
+                            setRunSelectionRange({ start: { row: rowIndex, col: 5 }, end: { row: rowIndex, col: 5 } });
+                          }}
+                          onMouseDown={() => startRunCellSelection(rowIndex, 5)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isRunCellInSelection(rowIndex, 6) ? sheetCellSelectedStyle : {}), ...(isActiveRunCell(rowIndex, 6) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startRunCellSelection(rowIndex, 6)}
+                        onMouseEnter={() => extendRunCellSelection(rowIndex, 6)}
+                      >
+                        <input
+                          value={row.policyPassRate}
+                          onChange={(e) => updateRunRow(row.key, "policyPassRate", e.target.value)}
+                          onPaste={(e) => handleRunSheetPaste(rowIndex, 6, e)}
+                          onFocus={() => {
+                            setActiveRunCell({ row: rowIndex, col: 6 });
+                            setRunSelectionRange({ start: { row: rowIndex, col: 6 }, end: { row: rowIndex, col: 6 } });
+                          }}
+                          onMouseDown={() => startRunCellSelection(rowIndex, 6)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isRunCellInSelection(rowIndex, 7) ? sheetCellSelectedStyle : {}), ...(isActiveRunCell(rowIndex, 7) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startRunCellSelection(rowIndex, 7)}
+                        onMouseEnter={() => extendRunCellSelection(rowIndex, 7)}
+                      >
+                        <input
+                          value={row.policyViolationRate}
+                          onChange={(e) => updateRunRow(row.key, "policyViolationRate", e.target.value)}
+                          onPaste={(e) => handleRunSheetPaste(rowIndex, 7, e)}
+                          onFocus={() => {
+                            setActiveRunCell({ row: rowIndex, col: 7 });
+                            setRunSelectionRange({ start: { row: rowIndex, col: 7 }, end: { row: rowIndex, col: 7 } });
+                          }}
+                          onMouseDown={() => startRunCellSelection(rowIndex, 7)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isRunCellInSelection(rowIndex, 8) ? sheetCellSelectedStyle : {}), ...(isActiveRunCell(rowIndex, 8) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startRunCellSelection(rowIndex, 8)}
+                        onMouseEnter={() => extendRunCellSelection(rowIndex, 8)}
+                      >
+                        <input
+                          value={row.recall}
+                          onChange={(e) => updateRunRow(row.key, "recall", e.target.value)}
+                          onPaste={(e) => handleRunSheetPaste(rowIndex, 8, e)}
+                          onFocus={() => {
+                            setActiveRunCell({ row: rowIndex, col: 8 });
+                            setRunSelectionRange({ start: { row: rowIndex, col: 8 }, end: { row: rowIndex, col: 8 } });
+                          }}
+                          onMouseDown={() => startRunCellSelection(rowIndex, 8)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isRunCellInSelection(rowIndex, 9) ? sheetCellSelectedStyle : {}), ...(isActiveRunCell(rowIndex, 9) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startRunCellSelection(rowIndex, 9)}
+                        onMouseEnter={() => extendRunCellSelection(rowIndex, 9)}
+                      >
+                        <input
+                          value={row.precision}
+                          onChange={(e) => updateRunRow(row.key, "precision", e.target.value)}
+                          onPaste={(e) => handleRunSheetPaste(rowIndex, 9, e)}
+                          onFocus={() => {
+                            setActiveRunCell({ row: rowIndex, col: 9 });
+                            setRunSelectionRange({ start: { row: rowIndex, col: 9 }, end: { row: rowIndex, col: 9 } });
+                          }}
+                          onMouseDown={() => startRunCellSelection(rowIndex, 9)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isRunCellInSelection(rowIndex, 10) ? sheetCellSelectedStyle : {}), ...(isActiveRunCell(rowIndex, 10) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startRunCellSelection(rowIndex, 10)}
+                        onMouseEnter={() => extendRunCellSelection(rowIndex, 10)}
+                      >
+                        <input
+                          value={row.f1Score}
+                          onChange={(e) => updateRunRow(row.key, "f1Score", e.target.value)}
+                          onPaste={(e) => handleRunSheetPaste(rowIndex, 10, e)}
+                          onFocus={() => {
+                            setActiveRunCell({ row: rowIndex, col: 10 });
+                            setRunSelectionRange({ start: { row: rowIndex, col: 10 }, end: { row: rowIndex, col: 10 } });
+                          }}
+                          onMouseDown={() => startRunCellSelection(rowIndex, 10)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div style={cardStyle}>
@@ -935,90 +1245,14 @@ export default function ProjectPocReviewPage() {
                 <span style={{ ...summaryIconStyle, background: "#dcfce7", color: "#166534" }}>B</span>
                 <div style={summaryCardTitleStyle}>비즈니스 가치 (Business Impact)</div>
               </div>
-              <p style={summaryTextStyle}>완료율 (Completion Rate)은 <span style={summaryValueStyle}>{summaryMetrics.completionRate.toFixed(1)}%</span>이며,</p>
-              <p style={summaryTextStyle}>이탈률 (Drop-off Rate)은 <span style={summaryValueStyle}>{summaryMetrics.dropoffRate.toFixed(1)}%</span> 에요.</p>
-              <div style={summaryGroupGapStyle} />
-              <p style={summaryTextStyle}>전환율 (Conversion Rate)은 <span style={summaryValueStyle}>{summaryMetrics.conversionRate.toFixed(1)}%</span>이고,</p>
-              <p style={summaryTextStyle}>고객 만족도 (NPS)는 <span style={summaryValueStyle}>{summaryMetrics.nps}</span>점이에요.</p>
-              <div style={summaryGroupGapStyle} />
-              <p style={{ ...summaryTextStyle, marginBottom: 0 }}>이를 기반 업무 생산성은 약 <span style={summaryValueStyle}>{summaryMetrics.productivityGain.toFixed(1)}%</span> 향상될 수 있어요.</p>
+              <p style={summaryTextStyle}>완료율은 (Completion Rate) <span style={summaryValueStyle}>{summaryMetrics.completionRate.toFixed(1)}%</span>이고,</p>
+              <p style={summaryTextStyle}>이탈률은 (Drop-off Rate) <span style={summaryValueStyle}>{summaryMetrics.dropoffRate.toFixed(1)}%</span>, 이며,</p>
+              <p style={{ ...summaryTextStyle, marginBottom: 0 }}>전환율 (Conversion Rate)은 <span style={summaryValueStyle}>{summaryMetrics.conversionRate.toFixed(1)}%</span> 이에요.</p>
             </div>
           </div>
-        </div>
-
-        <div style={cardStyle}>
-          <h3 style={cardTitleStyle}>모델 × 샘플 결과</h3>
-          <div style={tableWrapStyle}>
-            <table style={tableStyle}>
-              <thead>
-                <tr>
-                  <th style={thStyle}>모델</th>
-                  <th style={thStyle}>샘플</th>
-                  <th style={thStyle}>입력</th>
-                  <th style={thStyle}>출력 (Output)</th>
-                  <th style={thStyle}>수정 비율 (Edit Rate)</th>
-                  <th style={thStyle}>평균 컨피던스 (Confidence Score)</th>
-                  <th style={thStyle}>오류율 (Error Rate)</th>
-                  <th style={thStyle}>평균 응답 시간 (Average Latency)</th>
-                  <th style={thStyle}>요청당 비용 (Cost per Request)</th>
-                  <th style={thStyle}>정책 통과율 (Policy Pass Rate)</th>
-                  <th style={thStyle}>정책 위반율 (Policy Violation Rate)</th>
-                  <th style={thStyle}>전체 재현율 (Recall)</th>
-                  <th style={thStyle}>전체 정밀도 (Precision)</th>
-                  <th style={thStyle}>전체 F1 점수 (F1 Score)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runRows.map((row) => {
-                  const model = modelMap.get(row.modelId);
-                  const sample = sampleMap.get(row.sampleId);
-                  return (
-                    <tr key={row.key}>
-                      <td style={tdStyle}>{model?.name ?? row.modelId}</td>
-                      <td style={tdStyle}>{row.sampleId}</td>
-                      <td style={tdStyle}>{sample?.input || "-"}</td>
-                      <td style={tdStyle}>
-                        <input value={row.observedOutput} onChange={(e) => updateRunRow(row.key, "observedOutput", e.target.value)} style={cellInputStyle} />
-                      </td>
-                      <td style={tdStyle}>
-                        <input value={row.editRate} onChange={(e) => updateRunRow(row.key, "editRate", e.target.value)} style={cellInputStyle} />
-                      </td>
-                      <td style={tdStyle}>
-                        <input value={row.confidenceScore} onChange={(e) => updateRunRow(row.key, "confidenceScore", e.target.value)} style={cellInputStyle} />
-                      </td>
-                      <td style={tdStyle}>
-                        <input value={row.errorRate} onChange={(e) => updateRunRow(row.key, "errorRate", e.target.value)} style={cellInputStyle} />
-                      </td>
-                      <td style={tdStyle}>
-                        <input value={row.averageLatency} onChange={(e) => updateRunRow(row.key, "averageLatency", e.target.value)} style={cellInputStyle} />
-                      </td>
-                      <td style={tdStyle}>
-                        <input value={row.costPerRequest} onChange={(e) => updateRunRow(row.key, "costPerRequest", e.target.value)} style={cellInputStyle} />
-                      </td>
-                      <td style={tdStyle}>
-                        <input value={row.policyPassRate} onChange={(e) => updateRunRow(row.key, "policyPassRate", e.target.value)} style={cellInputStyle} />
-                      </td>
-                      <td style={tdStyle}>
-                        <input
-                          value={row.policyViolationRate}
-                          onChange={(e) => updateRunRow(row.key, "policyViolationRate", e.target.value)}
-                          style={cellInputStyle}
-                        />
-                      </td>
-                      <td style={tdStyle}>
-                        <input value={row.recall} onChange={(e) => updateRunRow(row.key, "recall", e.target.value)} style={cellInputStyle} />
-                      </td>
-                      <td style={tdStyle}>
-                        <input value={row.precision} onChange={(e) => updateRunRow(row.key, "precision", e.target.value)} style={cellInputStyle} />
-                      </td>
-                      <td style={tdStyle}>
-                        <input value={row.f1Score} onChange={(e) => updateRunRow(row.key, "f1Score", e.target.value)} style={cellInputStyle} />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div style={warningNoteWrapStyle}>
+            <p style={warningNoteStyle}>• POC 지표는 조건에 따라 실제 운영과 다를 수 있어요.</p>
+            <p style={warningNoteStyle}>• 모델 비교와 참고용으로만 사용해주세요.</p>
           </div>
         </div>
 
@@ -1067,28 +1301,6 @@ export default function ProjectPocReviewPage() {
                 )}
               </tbody>
             </table>
-          </div>
-        </div>
-
-        <div style={cardStyle}>
-          <h3 style={cardTitleStyle}>Go / Stop 결정</h3>
-          <div style={{ display: "grid", gap: 8 }}>
-            {core10ByModel.map((row) => (
-              <div key={`decision-${row.modelId}`} style={decisionItemStyle}>
-                <div style={{ fontWeight: 800 }}>{row.modelName}</div>
-                <div
-                  style={{
-                    fontWeight: 800,
-                    color: row.decision.status === "GO" ? "#166534" : row.decision.status === "CONDITIONAL" ? "#92400e" : "#991b1b",
-                  }}
-                >
-                  {row.decision.status}
-                </div>
-                <div style={{ color: "#6b7280", fontSize: 12 }}>
-                  {row.decision.failures.length === 0 ? "기준 충족" : row.decision.failures.join(" / ")}
-                </div>
-              </div>
-            ))}
           </div>
         </div>
 
@@ -1310,228 +1522,6 @@ const cardTitleStyle: CSSProperties = {
   color: "#111827",
 };
 
-const cardHeadStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "flex-start",
-  justifyContent: "space-between",
-  gap: 10,
-};
-
-const cardSubStyle: CSSProperties = {
-  marginTop: 4,
-  fontSize: 11,
-  color: "#64748b",
-  fontWeight: 600,
-};
-
-const miniButtonStyle: CSSProperties = {
-  border: "1px solid #d1d5db",
-  borderRadius: 8,
-  padding: "6px 9px",
-  background: "#fff",
-  fontSize: 11,
-  fontWeight: 700,
-  color: "#374151",
-  cursor: "pointer",
-};
-
-const topSearchWrapStyle: CSSProperties = {
-  marginTop: 10,
-};
-
-const topSearchInputStyle: CSSProperties = {
-  width: "100%",
-  border: "1px solid #dbe2ea",
-  borderRadius: 999,
-  padding: "10px 14px",
-  fontSize: 14,
-  background: "#f8fafc",
-};
-
-const topFilterGridStyle: CSSProperties = {
-  marginTop: 10,
-  display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-  gap: 8,
-};
-
-const topFilterItemStyle: CSSProperties = {
-  display: "grid",
-  gap: 4,
-};
-
-const topFilterLabelStyle: CSSProperties = {
-  fontSize: 11,
-  color: "#64748b",
-  fontWeight: 700,
-};
-
-const rangeWrapStyle: CSSProperties = {
-  border: "1px solid #e2e8f0",
-  borderRadius: 8,
-  background: "#fff",
-  padding: "6px 8px",
-  display: "grid",
-  gap: 4,
-};
-
-const rangeLabelStyle: CSSProperties = {
-  fontSize: 11,
-  color: "#334155",
-  fontWeight: 700,
-};
-
-const selectStyle: CSSProperties = {
-  width: "100%",
-  border: "1px solid #e2e8f0",
-  borderRadius: 8,
-  padding: "8px 10px",
-  fontSize: 13,
-  background: "#fff",
-};
-
-const modelListStyle: CSSProperties = {
-  marginTop: 10,
-  display: "grid",
-  gap: 6,
-  maxHeight: 170,
-  overflow: "auto",
-  paddingRight: 4,
-};
-
-const modelItemStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  fontSize: 13,
-  color: "#1f2937",
-  border: "1px solid #e5e7eb",
-  borderRadius: 8,
-  padding: "7px 8px",
-  background: "#f9fafb",
-};
-
-const modelMetaStyle: CSSProperties = {
-  color: "#64748b",
-  fontWeight: 600,
-  fontSize: 12,
-};
-
-const emptyStateStyle: CSSProperties = {
-  border: "1px dashed #cbd5e1",
-  borderRadius: 8,
-  padding: "10px 12px",
-  color: "#64748b",
-  fontSize: 12,
-  background: "#f8fafc",
-};
-
-const errorStateStyle: CSSProperties = {
-  border: "1px solid #fecaca",
-  borderRadius: 8,
-  padding: "10px 12px",
-  color: "#b91c1c",
-  fontSize: 12,
-  background: "#fef2f2",
-  fontWeight: 700,
-};
-
-const selectedCardWrapStyle: CSSProperties = {
-  marginTop: 10,
-  display: "flex",
-  gap: 8,
-  flexWrap: "wrap",
-};
-
-const selectedInfoCardStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  border: "1px solid #dbe2ea",
-  borderRadius: 10,
-  background: "#ffffff",
-  minWidth: 240,
-  maxWidth: 360,
-  padding: "8px 10px",
-  gap: 6,
-};
-
-const selectedInfoCardActiveStyle: CSSProperties = {
-  borderColor: "#93c5fd",
-  boxShadow: "inset 0 0 0 1px #bfdbfe",
-  background: "#f8fbff",
-};
-
-const selectedCardMainButtonStyle: CSSProperties = {
-  border: "none",
-  background: "transparent",
-  textAlign: "left",
-  cursor: "pointer",
-  padding: 0,
-  flex: 1,
-};
-
-const selectedCardRemoveStyle: CSSProperties = {
-  border: "none",
-  borderLeft: "1px solid #e5e7eb",
-  width: 34,
-  background: "#fff",
-  color: "#64748b",
-  fontSize: 18,
-  lineHeight: 1,
-  cursor: "pointer",
-};
-
-const modelDetailButtonStyle: CSSProperties = {
-  border: "1px solid #d1d5db",
-  borderRadius: 6,
-  background: "#fff",
-  color: "#334155",
-  fontSize: 11,
-  fontWeight: 700,
-  padding: "4px 7px",
-  cursor: "pointer",
-};
-
-const modelDetailPanelStyle: CSSProperties = {
-  marginTop: 10,
-  border: "1px solid #e2e8f0",
-  borderRadius: 8,
-  padding: "10px 10px",
-  background: "#f8fafc",
-};
-
-const modelDetailTitleStyle: CSSProperties = {
-  margin: 0,
-  fontSize: 14,
-  fontWeight: 800,
-  color: "#111827",
-};
-
-const modelDetailGridStyle: CSSProperties = {
-  marginTop: 8,
-  display: "grid",
-  gap: 4,
-};
-
-const modelDetailRowStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "72px 1fr",
-  gap: 8,
-  alignItems: "center",
-};
-
-const modelDetailKeyStyle: CSSProperties = {
-  fontSize: 11,
-  color: "#64748b",
-  fontWeight: 700,
-};
-
-const modelDetailValStyle: CSSProperties = {
-  fontSize: 12,
-  color: "#0f172a",
-  fontWeight: 700,
-};
-
 const tableWrapStyle: CSSProperties = {
   marginTop: 10,
   overflowX: "auto",
@@ -1567,25 +1557,86 @@ const tdStyle: CSSProperties = {
   background: "#fff",
 };
 
-const cellInputStyle: CSSProperties = {
+const sheetCellInputStyle: CSSProperties = {
   width: "100%",
-  border: "1px solid #e5e7eb",
-  borderRadius: 6,
-  padding: "6px 8px",
+  border: "none",
+  borderRadius: 0,
+  padding: "8px 10px",
   fontSize: 12,
-  background: "#fff",
+  background: "transparent",
+  outline: "none",
 };
 
-const actionBarStyle: CSSProperties = {
-  marginTop: 10,
-  border: "1px solid #e2e8f0",
-  borderRadius: 10,
+const sheetCellActiveStyle: CSSProperties = {
+  background: "#eff6ff",
+  boxShadow: "inset 0 0 0 1px #93c5fd",
+};
+
+const sheetCellSelectedStyle: CSSProperties = {
+  background: "#f8fbff",
+};
+
+const warningNoteWrapStyle: CSSProperties = {
+  marginTop: 8,
+  display: "grid",
+  gap: 2,
+};
+
+const warningNoteStyle: CSSProperties = {
+  margin: 0,
+  color: "#dc2626",
+  fontSize: 12,
+  lineHeight: 1.35,
+  fontWeight: 400,
+};
+
+const mappingBoxStyle: CSSProperties = {
+  marginTop: 4,
+  marginBottom: 10,
+  padding: "10px 12px",
+  border: "1px solid #dbe2ea",
+  borderRadius: 8,
   background: "#f8fafc",
-  padding: 10,
+};
+
+const mappingTitleStyle: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 800,
+  color: "#334155",
+  marginBottom: 8,
+};
+
+const mappingRowStyle: CSSProperties = {
+  display: "flex",
+  gap: 8,
+  alignItems: "flex-end",
+  flexWrap: "wrap",
+};
+
+const mappingLabelStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+  fontSize: 12,
+  fontWeight: 700,
+  color: "#475569",
+  minWidth: 180,
+};
+
+const mappingSelectStyle: CSSProperties = {
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: "8px 10px",
+  fontSize: 12,
+  color: "#111827",
+  background: "#fff",
+  minWidth: 200,
+};
+
+const mappingActionsStyle: CSSProperties = {
+  marginLeft: "auto",
   display: "flex",
   gap: 8,
   alignItems: "center",
-  flexWrap: "wrap",
 };
 
 const buttonStyle: CSSProperties = {
@@ -1593,31 +1644,18 @@ const buttonStyle: CSSProperties = {
   borderRadius: 8,
   padding: "8px 12px",
   background: "#fff",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  lineHeight: 1.2,
+  fontSize: 13,
   fontWeight: 700,
   cursor: "pointer",
 };
 
-const primaryButtonStyle: CSSProperties = {
-  ...buttonStyle,
-  borderColor: "#1d4ed8",
-  background: "#1d4ed8",
-  color: "#fff",
-};
-
 const ghostButtonStyle: CSSProperties = {
   ...buttonStyle,
-  marginTop: 8,
-  fontSize: 12,
-  padding: "6px 10px",
-};
-
-const decisionItemStyle: CSSProperties = {
-  border: "1px solid #e2e8f0",
-  borderRadius: 8,
-  padding: "8px 10px",
-  background: "#f8fafc",
-  display: "grid",
-  gap: 4,
+  padding: "8px 12px",
 };
 
 const summaryCardsGridStyle: CSSProperties = {
