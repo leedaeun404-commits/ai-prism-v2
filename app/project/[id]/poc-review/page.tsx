@@ -34,13 +34,16 @@ type SampleInput = {
   id: string;
   savedId?: string;
   input: string;
+  expectedOutput: string;
   description: string;
+  tags: string;
+  note: string;
 };
 type CsvImportDraft = {
   headers: string[];
   rows: string[][];
 };
-type SampleColIndex = 0 | 1;
+type SampleColIndex = 0 | 1 | 2 | 3 | 4 | 5;
 type SampleCell = { row: number; col: SampleColIndex };
 type RunColIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 type RunCell = { row: number; col: RunColIndex };
@@ -69,12 +72,106 @@ const DEFAULT_PROGRESS = {
   step3Completed: false,
 } as const;
 
-const VIEW_TABS: Array<{ key: Step5ViewTab; label: string }> = [
-  { key: "experiment", label: "실험뷰" },
-  { key: "release", label: "출시뷰" },
-  { key: "operational", label: "운영뷰" },
-  { key: "scaleup", label: "확장뷰" },
+const VIEW_TABS: Array<{ key: Step5ViewTab; label: string; helperTitle: string; helperText: string }> = [
+  {
+    key: "experiment",
+    label: "품질",
+    helperTitle: "실험뷰",
+    helperText: "기능이 의도대로 동작하는지 확인해요.\n정확도 및 수정 비율을 통해 실사용 가능성을 결정해요.",
+  },
+  {
+    key: "release",
+    label: "비용",
+    helperTitle: "출시뷰",
+    helperText: "요청당 비용과 평균 응답 시간을 확인해요.\n확장 시 감당 가능한 비용 구조인지 참고할 수 있어요.",
+  },
+  {
+    key: "operational",
+    label: "운영 리스크",
+    helperTitle: "운영뷰",
+    helperText: "정책 위반, 오류, 수동 개입 지표를 확인해요.\n운영 중 사고 가능성을 컨트롤 할 수 있는지 참고해요.",
+  },
+  {
+    key: "scaleup",
+    label: "비즈니스 가치",
+    helperTitle: "확장뷰",
+    helperText: "자동화율, 처리 시간 단축, ROI 등의 확장 기준을 정의해요.\n어떤 조건에서 고도화 할지 결정 기준을 참고해요.",
+  },
 ];
+
+type Step5TestUnitRow = {
+  unitId: string;
+  serviceName: string;
+  featureName: string;
+  aiTaskType: string;
+  testType: string;
+  metricPack: string[];
+  status: string;
+};
+type Step5UnitProgress = "idle" | "sampleReady" | "saved";
+
+const STEP5_TEST_UNIT_ROWS: Step5TestUnitRow[] = [
+  {
+    unitId: "UNIT-001",
+    serviceName: "콘텐츠 자동화",
+    featureName: "초안 생성",
+    aiTaskType: "초안 생성 (draft_generation)",
+    testType: "Offline",
+    metricPack: [
+      "수정 비율 (Edit Rate)",
+      "정책 통과율 (Policy Pass Rate)",
+      "평균 응답 시간 (Average Latency)",
+      "요청당 비용 (Cost per Request)",
+    ],
+    status: "결과 입력 대기",
+  },
+  {
+    unitId: "UNIT-002",
+    serviceName: "콘텐츠 자동화",
+    featureName: "개선 제안",
+    aiTaskType: "개선 제안 (revision_suggestion)",
+    testType: "Offline",
+    metricPack: ["수정 비율 (Edit Rate)", "정밀도 (Precision)", "재현율 (Recall)", "F1 점수 (F1 Score)"],
+    status: "결과 입력 대기",
+  },
+  {
+    unitId: "UNIT-003",
+    serviceName: "콘텐츠 자동화",
+    featureName: "정책 점검",
+    aiTaskType: "정책 점검 (policy_check)",
+    testType: "Offline",
+    metricPack: ["정책 통과율 (Policy Pass Rate)", "정책 위반율 (Policy Violation Rate)", "오류율 (Error Rate)"],
+    status: "결과 입력 대기",
+  },
+  {
+    unitId: "UNIT-004",
+    serviceName: "콘텐츠 자동화",
+    featureName: "정책 점검",
+    aiTaskType: "사전 검토 게이트 (pre_review_gate)",
+    testType: "Offline",
+    metricPack: ["수동 개입률 (Manual Intervention Rate)", "수정 비율 (Edit Rate)", "평균 응답 시간 (Average Latency)"],
+    status: "결과 입력 대기",
+  },
+];
+
+const TEST_UNIT_SAMPLE_TEMPLATES: Record<string, Array<Pick<SampleInput, "input" | "expectedOutput" | "description" | "tags" | "note">>> = {
+  "UNIT-001": [
+    { input: "제품 소개 초안 작성", expectedOutput: "", description: "초안 생성 품질 샘플", tags: "생성", note: "" },
+    { input: "홍보 문구 3가지 생성", expectedOutput: "", description: "다중 출력 샘플", tags: "생성", note: "" },
+  ],
+  "UNIT-002": [
+    { input: "기존 문장을 더 간결하게 개선", expectedOutput: "", description: "개선 제안 샘플", tags: "개선", note: "" },
+    { input: "톤앤매너를 공식적으로 수정", expectedOutput: "", description: "리비전 샘플", tags: "개선", note: "" },
+  ],
+  "UNIT-003": [
+    { input: "정책 위반 가능 문장 점검", expectedOutput: "", description: "정책 점검 샘플", tags: "정책", note: "" },
+    { input: "외부 노출 허용 여부 판단", expectedOutput: "", description: "정책 통과 샘플", tags: "정책", note: "" },
+  ],
+  "UNIT-004": [
+    { input: "사전 검토 필요 여부 분기", expectedOutput: "", description: "검토 게이트 샘플", tags: "검토", note: "" },
+    { input: "승인 조건 충족 여부 판단", expectedOutput: "", description: "승인 조건 샘플", tags: "검토", note: "" },
+  ],
+};
 
 const MOCK_MODEL_OPTIONS: ModelOption[] = [
   {
@@ -125,22 +222,34 @@ const MOCK_MODEL_OPTIONS: ModelOption[] = [
 
 const MODEL_SAMPLE_LIBRARY: Record<string, SampleInput[]> = {
   "gpt-x-base": [
-    { id: "S-1", input: "질문 A", description: "기본 검증 샘플" },
-    { id: "S-2", input: "질문 B", description: "일반 품질 검증 샘플" },
+    { id: "S-1", input: "질문 A", expectedOutput: "", description: "기본 검증 샘플", tags: "기본", note: "" },
+    { id: "S-2", input: "질문 B", expectedOutput: "", description: "일반 품질 검증 샘플", tags: "품질", note: "" },
   ],
   "gpt-x-plus": [
-    { id: "S-1", input: "정책 포함 문안 생성", description: "정책 검증 샘플" },
-    { id: "S-2", input: "초안 개선/수정 요청", description: "리라이팅 검증 샘플" },
+    { id: "S-1", input: "정책 포함 문안 생성", expectedOutput: "", description: "정책 검증 샘플", tags: "정책", note: "" },
+    { id: "S-2", input: "초안 개선/수정 요청", expectedOutput: "", description: "리라이팅 검증 샘플", tags: "개선", note: "" },
   ],
   "claude-pro": [
-    { id: "S-1", input: "민감 표현 포함 응답 점검", description: "위반 탐지 샘플" },
-    { id: "S-2", input: "외부 노출 가능 여부 판단", description: "정책 통과 샘플" },
+    { id: "S-1", input: "민감 표현 포함 응답 점검", expectedOutput: "", description: "위반 탐지 샘플", tags: "리스크", note: "" },
+    { id: "S-2", input: "외부 노출 가능 여부 판단", expectedOutput: "", description: "정책 통과 샘플", tags: "정책", note: "" },
   ],
   "llama-2": [
-    { id: "S-1", input: "짧은 공지 생성", description: "저비용 처리 샘플" },
-    { id: "S-2", input: "반복성 텍스트 생성", description: "대량 호출 샘플" },
+    { id: "S-1", input: "짧은 공지 생성", expectedOutput: "", description: "저비용 처리 샘플", tags: "저비용", note: "" },
+    { id: "S-2", input: "반복성 텍스트 생성", expectedOutput: "", description: "대량 호출 샘플", tags: "대량", note: "" },
   ],
 };
+
+function createSamplesFromTemplate(unitId: string): SampleInput[] {
+  const template = TEST_UNIT_SAMPLE_TEMPLATES[unitId] ?? [];
+  return template.map((sample, idx) => ({
+    id: `tmp-${idx + 1}`,
+    input: sample.input,
+    expectedOutput: sample.expectedOutput || "",
+    description: sample.description || "",
+    tags: sample.tags || "",
+    note: sample.note || "",
+  }));
+}
 
 function buildDefaultRunRow(modelId: string, sampleId: string): PocRunRow {
   return {
@@ -300,12 +409,17 @@ export default function ProjectPocReviewPage() {
   const twoPaneRef = useRef<HTMLDivElement | null>(null);
 
   const [viewTab, setViewTab] = useState<Step5ViewTab>("experiment");
+  const [activeTestUnitId, setActiveTestUnitId] = useState<string>(() => STEP5_TEST_UNIT_ROWS[0]?.unitId ?? "");
+  const [unitProgressById, setUnitProgressById] = useState<Record<string, Step5UnitProgress>>(() => {
+    const first = STEP5_TEST_UNIT_ROWS[0]?.unitId ?? "";
+    return STEP5_TEST_UNIT_ROWS.reduce<Record<string, Step5UnitProgress>>((acc, row) => {
+      acc[row.unitId] = row.unitId === first ? "sampleReady" : "idle";
+      return acc;
+    }, {});
+  });
   const [modelCatalog] = useState<ModelOption[]>(MOCK_MODEL_OPTIONS);
-  const [selectedModelIds] = useState<string[]>(() => MOCK_MODEL_OPTIONS.map((model) => model.id));
-  const [samples, setSamples] = useState<SampleInput[]>([
-    { id: "tmp-1", input: "질문 A", description: "기본 검증 샘플" },
-    { id: "tmp-2", input: "질문 B", description: "정책 검증 샘플" },
-  ]);
+  const [selectedModelIds] = useState<string[]>(() => MOCK_MODEL_OPTIONS.slice(0, 3).map((model) => model.id));
+  const [samples, setSamples] = useState<SampleInput[]>(() => createSamplesFromTemplate(STEP5_TEST_UNIT_ROWS[0]?.unitId ?? ""));
   const [runRows, setRunRows] = useState<PocRunRow[]>([]);
   const [message, setMessage] = useState("");
   const [activeSampleCell, setActiveSampleCell] = useState<SampleCell | null>(null);
@@ -317,7 +431,32 @@ export default function ProjectPocReviewPage() {
   const csvInputRef = useRef<HTMLInputElement | null>(null);
   const [csvImportDraft, setCsvImportDraft] = useState<CsvImportDraft | null>(null);
   const [csvInputHeader, setCsvInputHeader] = useState("");
+  const [csvExpectedHeader, setCsvExpectedHeader] = useState("");
   const [csvDescriptionHeader, setCsvDescriptionHeader] = useState("");
+  const [csvTagsHeader, setCsvTagsHeader] = useState("");
+  const [csvNoteHeader, setCsvNoteHeader] = useState("");
+  const [isRunInputExpanded, setIsRunInputExpanded] = useState(false);
+  const testRunResultRef = useRef<HTMLDivElement | null>(null);
+  const handleCreateSampleSet = useCallback((unitId: string) => {
+    const nextSamples = createSamplesFromTemplate(unitId);
+    if (nextSamples.length === 0) {
+      setMessage("이 테스트 조건에 연결된 샘플 템플릿이 없어요.");
+      return;
+    }
+    setActiveTestUnitId(unitId);
+    setSamples(nextSamples);
+    setUnitProgressById((prev) => ({ ...prev, [unitId]: "sampleReady" }));
+    setMessage(`샘플셋 생성 완료: ${unitId} 기준 샘플 ${nextSamples.length}개 (모델 3개 비교)`);
+  }, []);
+
+  const focusRunInputSection = useCallback((unitId: string) => {
+    setActiveTestUnitId(unitId);
+    setIsRunInputExpanded(true);
+    requestAnimationFrame(() => {
+      testRunResultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    setMessage(`${unitId} 결과 입력 섹션으로 이동했어요.`);
+  }, []);
 
   useEffect(() => {
     if (!id || !locked) return;
@@ -383,9 +522,16 @@ export default function ProjectPocReviewPage() {
     const merged = selectedModelIds.flatMap((modelId) => MODEL_SAMPLE_LIBRARY[modelId] ?? []);
     const dedup = new Map<string, SampleInput>();
     merged.forEach((sample) => {
-      const key = `${sample.input}::${sample.description}`;
+      const key = `${sample.input}::${sample.description}::${sample.tags}`;
       if (!dedup.has(key)) {
-        dedup.set(key, { id: `tmp-${dedup.size + 1}`, input: sample.input, description: sample.description });
+        dedup.set(key, {
+          id: `tmp-${dedup.size + 1}`,
+          input: sample.input,
+          expectedOutput: sample.expectedOutput || "",
+          description: sample.description,
+          tags: sample.tags || "",
+          note: sample.note || "",
+        });
       }
     });
     const nextSamples = Array.from(dedup.values());
@@ -396,6 +542,14 @@ export default function ProjectPocReviewPage() {
   const sampleMap = useMemo(() => new Map(samples.map((sample) => [sample.id, sample])), [samples]);
   const sampleDisplayMap = useMemo(() => new Map(samples.map((sample, idx) => [sample.id, sample.savedId || `임시-${idx + 1}`])), [samples]);
   const modelMap = useMemo(() => new Map(modelCatalog.map((model) => [model.id, model])), [modelCatalog]);
+  const activeSampleSetId = useMemo(
+    () => (activeTestUnitId ? `SSET-${activeTestUnitId.replace("UNIT-", "").padStart(3, "0")}` : "SSET-000"),
+    [activeTestUnitId]
+  );
+  const sampleSetModelNames = useMemo(
+    () => selectedModelIds.map((modelId) => modelMap.get(modelId)?.name ?? modelId),
+    [modelMap, selectedModelIds]
+  );
 
   const core10ByModel = useMemo(() => {
     return selectedModelIds.map((modelId) => {
@@ -422,81 +576,139 @@ export default function ProjectPocReviewPage() {
     });
   }, [modelMap, runRows, selectedModelIds]);
 
-  const decisionReference = useMemo(() => {
+  const testRunBaseRows = useMemo(() => {
+    const promptVersionByModel: Record<string, string> = {
+      "gpt-x-base": "v1",
+      "gpt-x-plus": "v2",
+      "claude-pro": "v1",
+      "llama-2": "v1",
+    };
+    return core10ByModel.map((row, idx) => {
+      const modelRuns = runRows.filter((run) => run.modelId === row.modelId);
+      const sampleCount = modelRuns.length;
+      const tokenUsage = Math.round(
+        modelRuns.reduce((acc, run) => acc + (run.predictedOutput || run.observedOutput || "").length * 3, 0)
+      );
+      const manualInterventionRate = Math.max(0.5, row.editRate * 0.2);
+      const automationRate = Math.max(0, 100 - row.editRate);
+      const processingTimeReduction = Math.max(0, Math.min(60, 30 - row.averageLatency / 100));
+      const conversionRate = Math.max(0, Math.min(100, (100 - row.errorRate * 2 - row.editRate * 0.3) * 0.16));
+      const roi = Math.max(0, conversionRate * 2 - row.costPerRequest * 100);
+      return {
+        testRunId: `T-${String(idx + 1).padStart(3, "0")}`,
+        modelName: row.modelName,
+        sampleCount,
+        promptVersion: promptVersionByModel[row.modelId] ?? "v1",
+        editRate: row.editRate,
+        precision: row.precision,
+        recall: row.recall,
+        f1Score: row.f1Score,
+        requirementPassRate: row.policyPassRate,
+        policyViolationRate: row.policyViolationRate,
+        errorRate: row.errorRate,
+        costPerRequest: row.costPerRequest,
+        tokenUsage,
+        averageLatency: row.averageLatency,
+        manualInterventionRate,
+        automationRate,
+        processingTimeReduction,
+        conversionRate,
+        roi,
+      };
+    });
+  }, [core10ByModel, runRows]);
+  const testRunTable = useMemo(() => {
     if (viewTab === "experiment") {
       return {
-        title: "실험뷰 (Experiment)",
-        headers: ["샘플 ID", "모델", "입력(Input)", "예상 출력(Predicted Output)", "수정률(Edit Rate)", "컨피던스", "오류율", "평균 응답 시간"],
-        rows: runRows.map((row) => {
-          const model = modelMap.get(row.modelId)?.name ?? row.modelId;
-          const sample = sampleMap.get(row.sampleId);
-          return [
-            sampleDisplayMap.get(row.sampleId) ?? row.sampleId,
-            model,
-            sample?.input || "-",
-            row.predictedOutput || "-",
-            `${row.editRate.toFixed(1)}%`,
-            row.confidenceScore.toFixed(2),
-            `${row.errorRate.toFixed(1)}%`,
-            `${row.averageLatency.toFixed(0)}ms`,
-          ];
-        }),
+        headers: [
+          "Test Run ID",
+          "모델 (Model)",
+          "샘플 수 (Sample Size)",
+          "수정 비율 (Edit Rate)",
+          "정밀도 (Precision)",
+          "재현율 (Recall)",
+          "F1 점수 (F1 Score)",
+          "요건 충족률 (Requirement Pass Rate)",
+          "정책 위반율 (Policy Violation Rate)",
+          "오류율 (Error Rate)",
+        ],
+        rows: testRunBaseRows.map((row) => [
+          row.testRunId,
+          row.modelName,
+          String(row.sampleCount),
+          `${row.editRate.toFixed(1)}%`,
+          row.precision.toFixed(2),
+          row.recall.toFixed(2),
+          row.f1Score.toFixed(2),
+          `${row.requirementPassRate.toFixed(1)}%`,
+          `${row.policyViolationRate.toFixed(1)}%`,
+          `${row.errorRate.toFixed(1)}%`,
+        ]),
       };
     }
     if (viewTab === "release") {
       return {
-        title: "출시뷰 (Release)",
-        headers: ["샘플 ID", "모델", "정책 통과율", "정책 위반율", "요청당 비용", "평균 응답 시간"],
-        rows: runRows.map((row) => {
-          const model = modelMap.get(row.modelId)?.name ?? row.modelId;
-          return [
-            sampleDisplayMap.get(row.sampleId) ?? row.sampleId,
-            model,
-            `${row.policyPassRate.toFixed(1)}%`,
-            `${row.policyViolationRate.toFixed(1)}%`,
-            `$${row.costPerRequest.toFixed(3)}`,
-            `${row.averageLatency.toFixed(0)}ms`,
-          ];
-        }),
+        headers: [
+          "Test Run ID",
+          "모델 (Model)",
+          "샘플 수 (Sample Size)",
+          "요청당 비용 (Cost per Request)",
+          "토큰 사용량 (Token Usage)",
+          "평균 응답 시간 (Average Latency)",
+        ],
+        rows: testRunBaseRows.map((row) => [
+          row.testRunId,
+          row.modelName,
+          String(row.sampleCount),
+          `$${row.costPerRequest.toFixed(3)}`,
+          row.tokenUsage.toLocaleString(),
+          `${row.averageLatency.toFixed(0)}ms`,
+        ]),
       };
     }
     if (viewTab === "operational") {
       return {
-        title: "운영뷰 (Operational)",
-        headers: ["모델", "Recall", "Precision", "F1", "평균 수정 비율", "수동 개입률", "타임아웃 비율", "재시도율"],
-        rows: core10ByModel.map((row) => [
+        headers: [
+          "Test Run ID",
+          "모델 (Model)",
+          "샘플 수 (Sample Size)",
+          "정책 위반율 (Policy Violation Rate)",
+          "시스템 오류율 (System Error Rate)",
+          "수동 개입률 (Manual Intervention Rate)",
+        ],
+        rows: testRunBaseRows.map((row) => [
+          row.testRunId,
           row.modelName,
-          row.recall.toFixed(2),
-          row.precision.toFixed(2),
-          row.f1Score.toFixed(2),
-          `${row.editRate.toFixed(1)}%`,
-          `${Math.max(0.5, row.editRate * 0.2).toFixed(1)}%`,
-          `${Math.max(0.1, row.errorRate * 0.2).toFixed(2)}%`,
-          `${Math.max(0.1, row.errorRate * 0.15).toFixed(2)}%`,
+          String(row.sampleCount),
+          `${row.policyViolationRate.toFixed(1)}%`,
+          `${row.errorRate.toFixed(1)}%`,
+          `${row.manualInterventionRate.toFixed(1)}%`,
         ]),
       };
     }
     return {
-      title: "확장뷰 (Scale-up)",
-      headers: ["DAU", "모델", "월 호출 예측수", "월 비용", "GPU 사용률", "지연율", "실패율"],
-      rows: core10ByModel.flatMap((row) => {
-        const dauPlans = [10000, 50000];
-        return dauPlans.map((dau) => {
-          const monthlyCalls = Math.round(dau * 3.2);
-          const monthlyCost = monthlyCalls * row.costPerRequest;
-          return [
-            dau.toLocaleString(),
-            row.modelName,
-            monthlyCalls.toLocaleString(),
-            `${Math.round(monthlyCost).toLocaleString()}원`,
-            `${Math.min(95, Math.max(20, row.averageLatency / 20)).toFixed(0)}%`,
-            `${Math.max(0.1, row.errorRate * 0.12).toFixed(2)}%`,
-            `${Math.max(0.1, row.errorRate * 0.2).toFixed(2)}%`,
-          ];
-        });
-      }),
+      headers: [
+        "Test Run ID",
+        "모델 (Model)",
+        "샘플 수 (Sample Size)",
+        "자동화율 (Automation Rate)",
+        "평균 처리 시간 단축률 (Processing Time Reduction)",
+        "전환율 (Conversion Rate)",
+        "ROI (Return on Investment)",
+      ],
+      rows: testRunBaseRows.map((row) => [
+        row.testRunId,
+        row.modelName,
+        String(row.sampleCount),
+        `${row.automationRate.toFixed(1)}%`,
+        `${row.processingTimeReduction.toFixed(1)}%`,
+        `${row.conversionRate.toFixed(1)}%`,
+        row.roi.toFixed(1),
+      ]),
     };
-  }, [core10ByModel, modelMap, runRows, sampleDisplayMap, sampleMap, viewTab]);
+  }, [testRunBaseRows, viewTab]);
+
+  const activeViewMeta = useMemo(() => VIEW_TABS.find((tab) => tab.key === viewTab) ?? VIEW_TABS[0], [viewTab]);
 
   const summaryMetrics = useMemo(() => {
     const safeDiv = (value: number, denominator: number) => (denominator > 0 ? value / denominator : 0);
@@ -604,8 +816,12 @@ export default function ProjectPocReviewPage() {
         if (rowIndex < rowMin || rowIndex > rowMax) return sample;
         const next = { ...sample };
         for (let col = colMin; col <= colMax; col += 1) {
-          if (col === 0) next.input = "";
-          if (col === 1) next.description = "";
+          if (col === 0) next.id = "";
+          if (col === 1) next.input = "";
+          if (col === 2) next.expectedOutput = "";
+          if (col === 3) next.description = "";
+          if (col === 4) next.tags = "";
+          if (col === 5) next.note = "";
         }
         return next;
       })
@@ -627,27 +843,33 @@ export default function ProjectPocReviewPage() {
       e.preventDefault();
       const [headers, ...rows] = grid;
       const inputHeader = guessHeader(headers, [/input/, /질문/, /요청/, /prompt/, /text/]);
+      const expectedHeader = guessHeader(headers, [/expected/, /예상/, /target/, /정답/, /reference/]);
       const descriptionHeader = guessHeader(headers, [/desc/, /설명/, /note/, /context/, /label/]);
+      const tagsHeader = guessHeader(headers, [/tag/, /태그/, /category/, /분류/]);
+      const noteHeader = guessHeader(headers, [/memo/, /비고/, /remark/, /comment/]);
       setCsvImportDraft({ headers, rows });
       setCsvInputHeader(inputHeader);
+      setCsvExpectedHeader(expectedHeader);
       setCsvDescriptionHeader(descriptionHeader);
+      setCsvTagsHeader(tagsHeader);
+      setCsvNoteHeader(noteHeader);
       setMessage(`표 붙여넣기 인식: ${rows.length}개 행을 불러왔어요. 컬럼 매핑 후 적용하세요.`);
       return;
     }
     e.preventDefault();
-    const colKeys: Array<keyof SampleInput> = ["input", "description"];
+    const colKeys: Array<keyof SampleInput> = ["id", "input", "expectedOutput", "description", "tags", "note"];
     setSamples((prev) => {
       const next = [...prev];
       const requiredRows = startRow + grid.length;
       while (next.length < requiredRows) {
-        next.push({ id: `S-${next.length + 1}`, input: "", description: "" });
+        next.push({ id: `S-${next.length + 1}`, input: "", expectedOutput: "", description: "", tags: "", note: "" });
       }
       for (let r = 0; r < grid.length; r += 1) {
         const rowIndex = startRow + r;
         const row = { ...next[rowIndex] };
         for (let c = 0; c < grid[r].length; c += 1) {
           const colIndex = startCol + c;
-          if (colIndex > 1) break;
+          if (colIndex > 5) break;
           row[colKeys[colIndex]] = grid[r][c];
         }
         next[rowIndex] = row;
@@ -679,10 +901,16 @@ export default function ProjectPocReviewPage() {
       }
       const [headers, ...rows] = parsed;
       const inputHeader = guessHeader(headers, [/input/, /질문/, /요청/, /prompt/, /text/]);
+      const expectedHeader = guessHeader(headers, [/expected/, /예상/, /target/, /정답/, /reference/]);
       const descriptionHeader = guessHeader(headers, [/desc/, /설명/, /note/, /context/, /label/]);
+      const tagsHeader = guessHeader(headers, [/tag/, /태그/, /category/, /분류/]);
+      const noteHeader = guessHeader(headers, [/memo/, /비고/, /remark/, /comment/]);
       setCsvImportDraft({ headers, rows });
       setCsvInputHeader(inputHeader);
+      setCsvExpectedHeader(expectedHeader);
       setCsvDescriptionHeader(descriptionHeader);
+      setCsvTagsHeader(tagsHeader);
+      setCsvNoteHeader(noteHeader);
       setMessage(`CSV 업로드 완료: ${rows.length}개 행을 불러왔어요. 컬럼 매핑 후 적용하세요.`);
     };
     reader.readAsText(file);
@@ -692,18 +920,24 @@ export default function ProjectPocReviewPage() {
   function applyCsvMapping() {
     if (!csvImportDraft) return;
     const inputIndex = csvImportDraft.headers.indexOf(csvInputHeader);
+    const expectedIndex = csvImportDraft.headers.indexOf(csvExpectedHeader);
     const descriptionIndex = csvImportDraft.headers.indexOf(csvDescriptionHeader);
-    if (inputIndex < 0 || descriptionIndex < 0) {
-      setMessage("입력/설명 컬럼 매핑을 확인해 주세요.");
+    const tagsIndex = csvImportDraft.headers.indexOf(csvTagsHeader);
+    const noteIndex = csvImportDraft.headers.indexOf(csvNoteHeader);
+    if (inputIndex < 0) {
+      setMessage("입력(Input) 컬럼 매핑을 확인해 주세요.");
       return;
     }
     const mapped = csvImportDraft.rows
       .map((row, idx) => ({
         id: `tmp-${idx + 1}`,
         input: row[inputIndex] ?? "",
-        description: row[descriptionIndex] ?? "",
+        expectedOutput: expectedIndex >= 0 ? row[expectedIndex] ?? "" : "",
+        description: descriptionIndex >= 0 ? row[descriptionIndex] ?? "" : "",
+        tags: tagsIndex >= 0 ? row[tagsIndex] ?? "" : "",
+        note: noteIndex >= 0 ? row[noteIndex] ?? "" : "",
       }))
-      .filter((row) => row.input.trim() || row.description.trim());
+      .filter((row) => row.input.trim() || row.expectedOutput.trim() || row.description.trim() || row.tags.trim() || row.note.trim());
     if (mapped.length === 0) {
       setMessage("매핑된 데이터가 비어 있어요. 컬럼 선택을 바꿔보세요.");
       return;
@@ -718,7 +952,10 @@ export default function ProjectPocReviewPage() {
   function cancelCsvMapping() {
     setCsvImportDraft(null);
     setCsvInputHeader("");
+    setCsvExpectedHeader("");
     setCsvDescriptionHeader("");
+    setCsvTagsHeader("");
+    setCsvNoteHeader("");
   }
 
   function updateRunRow(key: string, field: keyof PocRunRow, value: string) {
@@ -838,29 +1075,70 @@ export default function ProjectPocReviewPage() {
 
   function handleSavePoc() {
     setSamples((prev) => prev.map((sample, idx) => ({ ...sample, savedId: `S-${idx + 1}` })));
+    if (activeTestUnitId) {
+      setUnitProgressById((prev) => ({ ...prev, [activeTestUnitId]: "saved" }));
+    }
     setMessage(`결과 저장 완료: 모델 ${selectedModelIds.length}개 / 샘플 ${samples.length}개`);
   }
 
   return (
     <div ref={twoPaneRef} className="two-pane" style={twoPaneStyle}>
       <section style={mainPanelStyle}>
-        <div style={heroStyle}>
-          <h1 style={titleStyle}>STEP 5 PoC 리뷰</h1>
-          <p style={{ ...subtleStyle, marginTop: 6 }}>샘플셋 입력 → 예측 → 실측 입력 → Core10 비교 → Go/Stop 결정</p>
-        </div>
-
-        <div style={kpiCardsStyle}>
-          <div style={kpiCardStyle}>
-            <div style={kpiLabelStyle}>선택 모델</div>
-            <div style={kpiValueStyle}>{selectedModelIds.length}</div>
-          </div>
-          <div style={kpiCardStyle}>
-            <div style={kpiLabelStyle}>샘플 수</div>
-            <div style={kpiValueStyle}>{samples.length}</div>
-          </div>
-          <div style={kpiCardStyle}>
-            <div style={kpiLabelStyle}>비교 조합</div>
-            <div style={kpiValueStyle}>{runRows.length}</div>
+        <div style={cardStyle}>
+          <h3 style={cardTitleStyle}>기능 검증 시나리오</h3>
+          <p style={{ ...subtleStyle, marginTop: 0 }}>현재는 오프라인 테스트만 가능해요.</p>
+          <div style={tableWrapStyle}>
+            <table style={{ ...tableStyle, minWidth: 1280 }}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>서비스 (Service)</th>
+                  <th style={thStyle}>기능 (Feature)</th>
+                  <th style={thStyle}>AI 작업 유형 (AI Task)</th>
+                  <th style={thStyle}>테스트 타입 (Test Type)</th>
+                  <th style={thStyle}>적용 지표 팩 (Metric Pack)</th>
+                  <th style={thStyle}>실행 상태 (Status)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {STEP5_TEST_UNIT_ROWS.map((row) => (
+                  <tr key={`offline-overview-${row.unitId}`}>
+                    <td style={tdStyle}>{row.serviceName}</td>
+                    <td style={tdStyle}>{row.featureName}</td>
+                    <td style={tdStyle}>{row.aiTaskType}</td>
+                    <td style={tdStyle}>{row.testType}</td>
+                    <td style={tdStyle}>
+                      {row.metricPack.map((metric) => (
+                        <div key={`${row.unitId}-${metric}`}>{metric}</div>
+                      ))}
+                    </td>
+                    <td style={{ ...tdStyle, minWidth: 220 }}>
+                      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                        {unitProgressById[row.unitId] === "saved" ? (
+                          <button type="button" style={{ ...ghostButtonStyle, opacity: 0.6, cursor: "default" }} disabled>
+                            저장 완료
+                          </button>
+                        ) : unitProgressById[row.unitId] === "sampleReady" && activeTestUnitId === row.unitId ? (
+                          <button type="button" style={buttonStyle} onClick={() => focusRunInputSection(row.unitId)}>
+                            결과 입력하기
+                          </button>
+                        ) : (
+                          <button type="button" style={buttonStyle} onClick={() => handleCreateSampleSet(row.unitId)}>
+                            샘플셋 만들기
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {STEP5_TEST_UNIT_ROWS.length === 0 && (
+                  <tr>
+                    <td style={tdStyle} colSpan={6}>
+                      테스트 유닛이 없습니다.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -878,6 +1156,19 @@ export default function ProjectPocReviewPage() {
                 </button>
               </div>
             </div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+              <span style={{ ...subtleStyle, margin: 0 }}>
+                샘플셋 ID: <strong style={{ color: "#0f172a" }}>{activeSampleSetId}</strong>
+              </span>
+              <span style={{ ...subtleStyle, margin: 0 }}>실행 모델:</span>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {sampleSetModelNames.map((modelName) => (
+                  <span key={`sample-set-model-${modelName}`} style={smallChipStyle}>
+                    {modelName}
+                  </span>
+                ))}
+              </div>
+            </div>
             {csvImportDraft && (
               <div style={mappingBoxStyle}>
                 <div style={mappingTitleStyle}>CSV 컬럼 매핑</div>
@@ -893,10 +1184,40 @@ export default function ProjectPocReviewPage() {
                     </select>
                   </label>
                   <label style={mappingLabelStyle}>
+                    예상 출력 (Expected Output)
+                    <select value={csvExpectedHeader} onChange={(e) => setCsvExpectedHeader(e.target.value)} style={mappingSelectStyle}>
+                      {csvImportDraft.headers.map((header) => (
+                        <option key={`expected-${header}`} value={header}>
+                          {header}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={mappingLabelStyle}>
                     설명
                     <select value={csvDescriptionHeader} onChange={(e) => setCsvDescriptionHeader(e.target.value)} style={mappingSelectStyle}>
                       {csvImportDraft.headers.map((header) => (
                         <option key={`desc-${header}`} value={header}>
+                          {header}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={mappingLabelStyle}>
+                    태그 (Tags)
+                    <select value={csvTagsHeader} onChange={(e) => setCsvTagsHeader(e.target.value)} style={mappingSelectStyle}>
+                      {csvImportDraft.headers.map((header) => (
+                        <option key={`tags-${header}`} value={header}>
+                          {header}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={mappingLabelStyle}>
+                    비고 (Notes)
+                    <select value={csvNoteHeader} onChange={(e) => setCsvNoteHeader(e.target.value)} style={mappingSelectStyle}>
+                      {csvImportDraft.headers.map((header) => (
+                        <option key={`note-${header}`} value={header}>
                           {header}
                         </option>
                       ))}
@@ -917,8 +1238,12 @@ export default function ProjectPocReviewPage() {
               <table style={tableStyle}>
                 <thead>
                   <tr>
+                    <th style={thStyle}>샘플 ID</th>
                     <th style={thStyle}>입력 (Input)</th>
+                    <th style={thStyle}>예상 출력 (Expected Output)</th>
                     <th style={thStyle}>설명</th>
+                    <th style={thStyle}>태그 (Tags)</th>
+                    <th style={thStyle}>비고 (Notes)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -930,8 +1255,8 @@ export default function ProjectPocReviewPage() {
                         onMouseEnter={() => extendSampleCellSelection(index, 0)}
                       >
                         <input
-                          value={sample.input}
-                          onChange={(e) => updateSample(index, "input", e.target.value)}
+                          value={sample.id}
+                          onChange={(e) => updateSample(index, "id", e.target.value)}
                           onPaste={(e) => handleSampleSheetPaste(index, 0, e)}
                           onFocus={() => {
                             setActiveSampleCell({ row: index, col: 0 });
@@ -947,14 +1272,82 @@ export default function ProjectPocReviewPage() {
                         onMouseEnter={() => extendSampleCellSelection(index, 1)}
                       >
                         <input
-                          value={sample.description}
-                          onChange={(e) => updateSample(index, "description", e.target.value)}
+                          value={sample.input}
+                          onChange={(e) => updateSample(index, "input", e.target.value)}
                           onPaste={(e) => handleSampleSheetPaste(index, 1, e)}
                           onFocus={() => {
                             setActiveSampleCell({ row: index, col: 1 });
                             setSampleSelectionRange({ start: { row: index, col: 1 }, end: { row: index, col: 1 } });
                           }}
                           onMouseDown={() => startSampleCellSelection(index, 1)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isSampleCellInSelection(index, 2) ? sheetCellSelectedStyle : {}), ...(isActiveSampleCell(index, 2) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startSampleCellSelection(index, 2)}
+                        onMouseEnter={() => extendSampleCellSelection(index, 2)}
+                      >
+                        <input
+                          value={sample.expectedOutput}
+                          onChange={(e) => updateSample(index, "expectedOutput", e.target.value)}
+                          onPaste={(e) => handleSampleSheetPaste(index, 2, e)}
+                          onFocus={() => {
+                            setActiveSampleCell({ row: index, col: 2 });
+                            setSampleSelectionRange({ start: { row: index, col: 2 }, end: { row: index, col: 2 } });
+                          }}
+                          onMouseDown={() => startSampleCellSelection(index, 2)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isSampleCellInSelection(index, 3) ? sheetCellSelectedStyle : {}), ...(isActiveSampleCell(index, 3) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startSampleCellSelection(index, 3)}
+                        onMouseEnter={() => extendSampleCellSelection(index, 3)}
+                      >
+                        <input
+                          value={sample.description}
+                          onChange={(e) => updateSample(index, "description", e.target.value)}
+                          onPaste={(e) => handleSampleSheetPaste(index, 3, e)}
+                          onFocus={() => {
+                            setActiveSampleCell({ row: index, col: 3 });
+                            setSampleSelectionRange({ start: { row: index, col: 3 }, end: { row: index, col: 3 } });
+                          }}
+                          onMouseDown={() => startSampleCellSelection(index, 3)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isSampleCellInSelection(index, 4) ? sheetCellSelectedStyle : {}), ...(isActiveSampleCell(index, 4) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startSampleCellSelection(index, 4)}
+                        onMouseEnter={() => extendSampleCellSelection(index, 4)}
+                      >
+                        <input
+                          value={sample.tags}
+                          onChange={(e) => updateSample(index, "tags", e.target.value)}
+                          onPaste={(e) => handleSampleSheetPaste(index, 4, e)}
+                          onFocus={() => {
+                            setActiveSampleCell({ row: index, col: 4 });
+                            setSampleSelectionRange({ start: { row: index, col: 4 }, end: { row: index, col: 4 } });
+                          }}
+                          onMouseDown={() => startSampleCellSelection(index, 4)}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isSampleCellInSelection(index, 5) ? sheetCellSelectedStyle : {}), ...(isActiveSampleCell(index, 5) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startSampleCellSelection(index, 5)}
+                        onMouseEnter={() => extendSampleCellSelection(index, 5)}
+                      >
+                        <input
+                          value={sample.note}
+                          onChange={(e) => updateSample(index, "note", e.target.value)}
+                          onPaste={(e) => handleSampleSheetPaste(index, 5, e)}
+                          onFocus={() => {
+                            setActiveSampleCell({ row: index, col: 5 });
+                            setSampleSelectionRange({ start: { row: index, col: 5 }, end: { row: index, col: 5 } });
+                          }}
+                          onMouseDown={() => startSampleCellSelection(index, 5)}
                           style={sheetCellInputStyle}
                         />
                       </td>
@@ -966,9 +1359,50 @@ export default function ProjectPocReviewPage() {
           </div>
         </div>
 
-        <div style={cardStyle}>
-          <h3 style={cardTitleStyle}>모델 × 샘플 결과</h3>
-          <div style={tableWrapStyle} onKeyDownCapture={handleRunSheetKeyDownCapture}>
+        <div ref={testRunResultRef} style={cardStyle}>
+          <h3 style={cardTitleStyle}>Test Run 결과</h3>
+          <div style={viewTabsStyle}>
+            {VIEW_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setViewTab(tab.key)}
+                style={{ ...viewTabButtonStyle, ...(viewTab === tab.key ? viewTabButtonActiveStyle : {}) }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ ...subtleStyle, marginTop: 8, marginBottom: 8, whiteSpace: "pre-line" }}>
+            {activeViewMeta.helperText}
+          </div>
+          <div style={tableWrapStyle}>
+            <table style={{ ...tableStyle, minWidth: 920 }}>
+              <thead>
+                <tr>
+                  {testRunTable.headers.map((header) => (
+                    <th key={header} style={thStyle}>
+                      {header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {testRunTable.rows.map((row, rowIndex) => (
+                  <tr key={`test-run-summary-${rowIndex}`}>
+                    {row.map((value, colIndex) => (
+                      <td key={`test-run-summary-${rowIndex}-${colIndex}`} style={tdStyle}>
+                        {value}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <details style={{ marginTop: 10 }} open={isRunInputExpanded} onToggle={(e) => setIsRunInputExpanded((e.currentTarget as HTMLDetailsElement).open)}>
+            <summary style={{ cursor: "pointer", color: "#64748b", fontSize: 12, fontWeight: 700 }}>상세 입력 테이블 보기</summary>
+            <div style={tableWrapStyle} onKeyDownCapture={handleRunSheetKeyDownCapture}>
             <table style={tableStyle}>
               <thead>
                 <tr>
@@ -1189,118 +1623,72 @@ export default function ProjectPocReviewPage() {
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
+          </details>
         </div>
 
         <div style={cardStyle}>
-          <h3 style={cardTitleStyle}>지표 요약</h3>
+          <h3 style={cardTitleStyle}>테스트 결과 해석</h3>
           <div style={summaryCardsGridStyle}>
-            <div style={summaryCardStyle}>
+            <div style={{ ...summaryCardStyle, ...(viewTab === "experiment" ? summaryCardActiveStyle : {}) }}>
               <div style={summaryCardHeadStyle}>
                 <span style={{ ...summaryIconStyle, background: "#fef3c7", color: "#92400e" }}>Q</span>
                 <div style={summaryCardTitleStyle}>품질 (Quality)</div>
               </div>
-              <p style={summaryTextStyle}>이번 POC 샘플 <span style={summaryValueStyle}>{summaryMetrics.sampleCount}</span>건을 모델에 입력했어요.</p>
-              <p style={summaryTextStyle}>모델이 생성한 출력의 전체 토큰 수는 <span style={summaryValueStyle}>{summaryMetrics.tokenUsage.toLocaleString()}</span>개로,</p>
-              <p style={summaryTextStyle}>요청당 평균 토큰 수는 <span style={summaryValueStyle}>{summaryMetrics.avgTokenPerRequest.toLocaleString()}</span>개에요.</p>
+              <p style={summaryTextStyle}>👉 기능이 의도대로 동작하는가?</p>
               <div style={summaryGroupGapStyle} />
-              <p style={summaryTextStyle}>입력 대비 모델이 생성한 출력에서 실제 사용자가 수정한 수는 <span style={summaryValueStyle}>{summaryMetrics.editedCount}</span>건이고,</p>
-              <p style={summaryTextStyle}>전체 출력 대비 수정 비율 (Edit Rate)은 <span style={summaryValueStyle}>{summaryMetrics.avgEditRate.toFixed(1)}%</span>에요.</p>
+              <p style={summaryTextStyle}>분류형 기준: 정밀도 (Precision) <span style={summaryValueStyle}>{summaryMetrics.avgPrecision.toFixed(2)}</span>, 재현율 (Recall) <span style={summaryValueStyle}>{summaryMetrics.avgRecall.toFixed(2)}</span></p>
+              <p style={summaryTextStyle}>생성형 기준: 수정 비율 (Edit Rate) <span style={summaryValueStyle}>{summaryMetrics.avgEditRate.toFixed(1)}%</span></p>
+              <p style={summaryTextStyle}>정책 위반율 (Policy Violation Rate) <span style={summaryValueStyle}>{summaryMetrics.avgPolicyViolation.toFixed(1)}%</span></p>
               <div style={summaryGroupGapStyle} />
-              <p style={summaryTextStyle}>모델이 맞춘 정답 수 (True Positive)는 <span style={summaryValueStyle}>{summaryMetrics.tp}</span>건,</p>
-              <p style={summaryTextStyle}>잘못 승인된 경우 (False Positive)는 <span style={summaryValueStyle}>{summaryMetrics.fp}</span>건,</p>
-              <p style={summaryTextStyle}>놓친 정답 (False Negative)은 <span style={summaryValueStyle}>{summaryMetrics.fn}</span>건이에요.</p>
-              <div style={summaryGroupGapStyle} />
-              <p style={summaryTextStyle}>이를 종합하면 정밀도 (Precision)은 <span style={summaryValueStyle}>{summaryMetrics.avgPrecision.toFixed(2)}</span>,</p>
-              <p style={summaryTextStyle}>재현율 (Recall)은 <span style={summaryValueStyle}>{summaryMetrics.avgRecall.toFixed(2)}</span>,</p>
-              <p style={{ ...summaryTextStyle, marginBottom: 0 }}>F1 점수 (F1 Score)는 <span style={summaryValueStyle}>{summaryMetrics.avgF1.toFixed(2)}</span>에요.</p>
+              <p style={{ ...summaryTextStyle, marginBottom: 0 }}>✔ 기능 신뢰도 기준 충족 여부 판단</p>
             </div>
 
-            <div style={summaryCardStyle}>
+            <div style={{ ...summaryCardStyle, ...(viewTab === "release" ? summaryCardActiveStyle : {}) }}>
               <div style={summaryCardHeadStyle}>
                 <span style={{ ...summaryIconStyle, background: "#dbeafe", color: "#1d4ed8" }}>$</span>
                 <div style={summaryCardTitleStyle}>비용 (Cost)</div>
               </div>
-              <p style={summaryTextStyle}>요청당 평균 비용 (Cost per Request)은 <span style={summaryValueStyle}>${summaryMetrics.avgCost.toFixed(3)}</span>에요.</p>
-              <p style={summaryTextStyle}>이번 샘플 실행에서 발생한 전체 비용은 <span style={summaryValueStyle}>${summaryMetrics.totalCost.toFixed(2)}</span>에요.</p>
-              <p style={summaryTextStyle}>생성된 토큰 총 수 (Token Usage)는 <span style={summaryValueStyle}>{summaryMetrics.tokenUsage.toLocaleString()}</span>개에요.</p>
+              <p style={summaryTextStyle}>👉 확장 가능성 판단</p>
               <div style={summaryGroupGapStyle} />
-              <p style={{ ...summaryTextStyle, marginBottom: 0 }}>이에 따른 월간 예상 비용 (Monthly Estimated Cost)은 <span style={summaryValueStyle}>{summaryMetrics.monthlyEstimatedCostKrw.toLocaleString()}원</span> 이에요.</p>
+              <p style={summaryTextStyle}>요청당 평균 비용 (Cost per Request)은 <span style={summaryValueStyle}>${summaryMetrics.avgCost.toFixed(3)}</span>에요.</p>
+              <p style={summaryTextStyle}>평균 응답 시간 (Average Latency)은 <span style={summaryValueStyle}>{summaryMetrics.avgLatency.toFixed(0)}ms</span>에요.</p>
+              <div style={summaryGroupGapStyle} />
+              <p style={{ ...summaryTextStyle, marginBottom: 0 }}>✔ 월간 확장 시 비용 예측 가능</p>
             </div>
 
-            <div style={summaryCardStyle}>
+            <div style={{ ...summaryCardStyle, ...(viewTab === "operational" ? summaryCardActiveStyle : {}) }}>
               <div style={summaryCardHeadStyle}>
                 <span style={{ ...summaryIconStyle, background: "#fee2e2", color: "#b91c1c" }}>!</span>
-                <div style={summaryCardTitleStyle}>리스크 (Risk)</div>
+                <div style={summaryCardTitleStyle}>운영 리스크 (Risk)</div>
               </div>
-              <p style={summaryTextStyle}>정책 통과율 (Policy Pass Rate)은 <span style={summaryValueStyle}>{summaryMetrics.avgPolicyPass.toFixed(1)}%</span>이며,</p>
-              <p style={summaryTextStyle}>정책 위반율 (Policy Violation Rate)은 <span style={summaryValueStyle}>{summaryMetrics.avgPolicyViolation.toFixed(1)}%</span>에요.</p>
+              <p style={summaryTextStyle}>👉 사고 가능성 판단</p>
               <div style={summaryGroupGapStyle} />
-              <p style={summaryTextStyle}>시스템 오류율 (System Error Rate) <span style={summaryValueStyle}>{summaryMetrics.avgErrorRate.toFixed(1)}%</span> 발생했고,</p>
-              <p style={{ ...summaryTextStyle, marginBottom: 0 }}>롤백 발생 횟수 (Rollback Count)는 <span style={summaryValueStyle}>{summaryMetrics.rollbackCount}</span>회에요.</p>
+              <p style={summaryTextStyle}>정책 위반율 (Policy Violation Rate)은 <span style={summaryValueStyle}>{summaryMetrics.avgPolicyViolation.toFixed(1)}%</span>에요.</p>
+              <p style={summaryTextStyle}>오류율 (System Error Rate) <span style={summaryValueStyle}>{summaryMetrics.avgErrorRate.toFixed(1)}%</span></p>
+              <p style={summaryTextStyle}>수동 개입률 (Manual Intervention Rate) <span style={summaryValueStyle}>{Math.max(0.5, summaryMetrics.avgEditRate * 0.2).toFixed(1)}%</span></p>
+              <div style={summaryGroupGapStyle} />
+              <p style={{ ...summaryTextStyle, marginBottom: 0 }}>✔ 운영 투입 없이 자동화 가능 여부</p>
             </div>
 
-            <div style={summaryCardStyle}>
+            <div style={{ ...summaryCardStyle, ...(viewTab === "scaleup" ? summaryCardActiveStyle : {}) }}>
               <div style={summaryCardHeadStyle}>
                 <span style={{ ...summaryIconStyle, background: "#dcfce7", color: "#166534" }}>B</span>
-                <div style={summaryCardTitleStyle}>비즈니스 가치 (Business Impact)</div>
+                <div style={summaryCardTitleStyle}>비즈니스 가치 (Business Gate)</div>
               </div>
-              <p style={summaryTextStyle}>완료율은 (Completion Rate) <span style={summaryValueStyle}>{summaryMetrics.completionRate.toFixed(1)}%</span>이고,</p>
-              <p style={summaryTextStyle}>이탈률은 (Drop-off Rate) <span style={summaryValueStyle}>{summaryMetrics.dropoffRate.toFixed(1)}%</span>, 이며,</p>
-              <p style={{ ...summaryTextStyle, marginBottom: 0 }}>전환율 (Conversion Rate)은 <span style={summaryValueStyle}>{summaryMetrics.conversionRate.toFixed(1)}%</span> 이에요.</p>
+              <p style={summaryTextStyle}>👉 성공 기준 정의</p>
+              <div style={summaryGroupGapStyle} />
+              <p style={summaryTextStyle}>자동화율 (Automation Rate) ≥ <span style={summaryValueStyle}>X%</span></p>
+              <p style={summaryTextStyle}>평균 처리 시간 단축률 (Processing Time Reduction) ≥ <span style={summaryValueStyle}>Y%</span></p>
+              <p style={summaryTextStyle}>전환율 (Conversion Rate) +<span style={summaryValueStyle}>Z%p</span></p>
+              <p style={summaryTextStyle}>ROI (Return on Investment) ≥ <span style={summaryValueStyle}>기준값</span></p>
+              <div style={summaryGroupGapStyle} />
+              <p style={{ ...summaryTextStyle, marginBottom: 0 }}>✔ 확장 판단 기준 정의 완료</p>
             </div>
           </div>
           <div style={warningNoteWrapStyle}>
             <p style={warningNoteStyle}>• POC 지표는 조건에 따라 실제 운영과 다를 수 있어요.</p>
             <p style={warningNoteStyle}>• 모델 비교와 참고용으로만 사용해주세요.</p>
-          </div>
-        </div>
-
-        <div style={cardStyle}>
-          <h3 style={cardTitleStyle}>의사결정 참고 테이블</h3>
-          <div style={viewTabsStyle}>
-            {VIEW_TABS.map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setViewTab(tab.key)}
-                style={{ ...viewTabButtonStyle, ...(viewTab === tab.key ? viewTabButtonActiveStyle : {}) }}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-          <div style={{ ...subtleStyle, marginTop: 8, marginBottom: 2 }}>{decisionReference.title}</div>
-          <div style={tableWrapStyle}>
-            <table style={tableStyle}>
-              <thead>
-                <tr>
-                  {decisionReference.headers.map((header) => (
-                    <th key={header} style={thStyle}>
-                      {header}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {decisionReference.rows.map((columns, idx) => (
-                  <tr key={`decision-row-${idx}`}>
-                    {columns.map((value, colIdx) => (
-                      <td key={`decision-cell-${idx}-${colIdx}`} style={tdStyle}>
-                        {value}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-                {decisionReference.rows.length === 0 && (
-                  <tr>
-                    <td style={tdStyle} colSpan={decisionReference.headers.length}>
-                      모델을 선택하면 Core10 비교가 표시됩니다.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
           </div>
         </div>
 
@@ -1435,13 +1823,6 @@ const sidePanelStyle: CSSProperties = {
 
 const resizerStyle: CSSProperties = {
   background: "transparent",
-};
-
-const titleStyle: CSSProperties = {
-  margin: 0,
-  fontSize: 24,
-  fontWeight: 800,
-  color: "#111827",
 };
 
 const subtleStyle: CSSProperties = {
@@ -1658,6 +2039,19 @@ const ghostButtonStyle: CSSProperties = {
   padding: "8px 12px",
 };
 
+const smallChipStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  border: "1px solid #dbe2ea",
+  borderRadius: 999,
+  background: "#f8fafc",
+  color: "#334155",
+  fontSize: 12,
+  fontWeight: 700,
+  lineHeight: 1,
+  padding: "5px 9px",
+};
+
 const summaryCardsGridStyle: CSSProperties = {
   marginTop: 10,
   display: "grid",
@@ -1671,6 +2065,12 @@ const summaryCardStyle: CSSProperties = {
   background: "#fff",
   padding: "12px 12px",
   boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+};
+
+const summaryCardActiveStyle: CSSProperties = {
+  border: "1px solid #93c5fd",
+  background: "#f8fbff",
+  boxShadow: "0 0 0 1px rgba(147, 197, 253, 0.35), 0 4px 10px rgba(59, 130, 246, 0.08)",
 };
 
 const summaryCardHeadStyle: CSSProperties = {
@@ -1711,35 +2111,4 @@ const summaryGroupGapStyle: CSSProperties = {
 const summaryValueStyle: CSSProperties = {
   color: "#1d4ed8",
   fontWeight: 800,
-};
-
-const heroStyle: CSSProperties = {
-  marginBottom: 4,
-};
-
-const kpiCardsStyle: CSSProperties = {
-  marginTop: 10,
-  display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-  gap: 8,
-};
-
-const kpiCardStyle: CSSProperties = {
-  border: "1px solid #e2e8f0",
-  borderRadius: 10,
-  background: "#ffffff",
-  padding: "8px 10px",
-};
-
-const kpiLabelStyle: CSSProperties = {
-  fontSize: 11,
-  color: "#64748b",
-  fontWeight: 700,
-};
-
-const kpiValueStyle: CSSProperties = {
-  marginTop: 4,
-  fontSize: 18,
-  fontWeight: 800,
-  color: "#0f172a",
 };
