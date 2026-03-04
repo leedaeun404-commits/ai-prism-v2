@@ -46,7 +46,7 @@ type CsvImportDraft = {
 };
 type SampleColIndex = number;
 type SampleCell = { row: number; col: SampleColIndex };
-type RunColIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+type RunColIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 type RunCell = { row: number; col: RunColIndex };
 
 type DatasetState = {
@@ -78,6 +78,9 @@ type RawExecutionRow = {
   tokenUsage: number;
   error: number;
   policyFlag: number;
+  errorReason?: "HF_GATED" | "PROVIDER_ERROR" | "UNSUPPORTED_PROVIDER" | "UNKNOWN";
+  errorReasonDetail?: string;
+  providerStatus?: number;
 };
 
 type PocRunRow = {
@@ -86,6 +89,7 @@ type PocRunRow = {
   sampleId: string;
   predictedOutput: string;
   observedOutput: string;
+  reviewedOutput: string;
   editRate: number;
   confidenceScore: number;
   errorRate: number;
@@ -95,6 +99,25 @@ type PocRunRow = {
   recall: number;
   precision: number;
   f1Score: number;
+  errorReason?: "HF_GATED" | "PROVIDER_ERROR" | "UNSUPPORTED_PROVIDER" | "UNKNOWN";
+  errorReasonDetail?: string;
+  providerStatus?: number;
+};
+
+type Step5PersistedState = {
+  activeTestUnitId: string;
+  unitProgressById: Record<string, Step5UnitProgress>;
+  datasetSourceByUnit: Record<string, DatasetSourceType | null>;
+  datasetDirtyByUnit: Record<string, boolean>;
+  datasetLogByUnit: Record<string, string[]>;
+  datasetColumnsByUnit: Record<string, DatasetColumnDef[]>;
+  datasetsByUnit: Record<string, DatasetState>;
+  specializedModelIdByUnit: Record<string, string>;
+  samplesByUnit: Record<string, SampleInput[]>;
+  runRowsByUnit: Record<string, PocRunRow[]>;
+  runRecordsByUnit: Record<string, RunRecord[]>;
+  rawExecutionRowsByUnit: Record<string, RawExecutionRow[]>;
+  nextRunSeq: number;
 };
 
 type MetricKey =
@@ -169,6 +192,10 @@ const MODEL_STRATEGY_SLOT_LABELS: Record<ModelStrategySlot, string> = {
   lowCost: "Low Cost (저비용 모델)",
   specialized: "Specialized (특화 모델)",
 };
+const BASELINE_MODEL_ID = "gpt-4o";
+const LOW_COST_MODEL_ID = "gpt-4o-mini";
+const SPECIALIZED_DEFAULT_MODEL_ID = "mistral-7b-instruct";
+const STEP5_STATE_STORAGE_PREFIX = "prism2:step5:state:";
 
 function metricKeyFromLabel(label: string): MetricKey | null {
   const normalized = label.toLowerCase();
@@ -534,48 +561,59 @@ const TEST_UNIT_SAMPLE_TEMPLATES: Record<string, Array<Pick<SampleInput, "input"
 
 const MOCK_MODEL_OPTIONS: ModelOption[] = [
   {
-    id: "gpt-x-base",
-    name: "GPT-X Base",
+    id: "gpt-4o",
+    name: "GPT-4o",
     provider: "OpenAI",
-    version: "v1",
+    version: "latest",
     role: "Generation",
-    releaseDate: "2026-01-10",
-    specialty: "초안 생성",
+    releaseDate: "2024-05-13",
+    specialty: "고품질 생성/추론",
     domain: "콘텐츠 자동화",
-    summary: "기본 생성 품질과 속도 균형형 모델",
+    summary: "기준 품질 모델",
   },
   {
-    id: "gpt-x-plus",
-    name: "GPT-X Plus",
+    id: "gpt-4o-mini",
+    name: "GPT-4o mini",
     provider: "OpenAI",
-    version: "v2",
+    version: "latest",
     role: "Review",
-    releaseDate: "2026-02-02",
-    specialty: "조건부 승인/리라이팅",
+    releaseDate: "2024-07-18",
+    specialty: "저비용/고속 처리",
     domain: "정책 반영 자동화",
-    summary: "생성+검토 파이프라인에 최적화된 모델",
+    summary: "저비용 기본 모델",
   },
   {
-    id: "claude-pro",
-    name: "Claude Pro",
-    provider: "Anthropic",
-    version: "v3",
+    id: "mistral-7b-instruct",
+    name: "Mistral 7B Instruct",
+    provider: "HuggingFace",
+    version: "v0.3",
     role: "Policy Guard",
     releaseDate: "2025-12-18",
-    specialty: "정책 준수 검증",
+    specialty: "저비용 정책 점검",
     domain: "리스크/안전",
-    summary: "정책 위반 탐지와 보수적 응답에 강점",
+    summary: "오프라인 정책 검증과 비용 균형 탐색에 적합",
   },
   {
-    id: "llama-2",
-    name: "LLaMA-2",
-    provider: "Meta",
+    id: "llama-3-8b-instruct",
+    name: "Llama 3 8B Instruct",
+    provider: "HuggingFace",
     version: "v1",
     role: "Summarization",
     releaseDate: "2025-10-05",
-    specialty: "저비용 처리",
+    specialty: "범용 생성",
     domain: "대량 트래픽",
-    summary: "비용 효율 우선 시나리오에 적합",
+    summary: "저비용 범용 생성형 대안 모델",
+  },
+  {
+    id: "gemma-2-9b-it",
+    name: "Gemma 2 9B IT",
+    provider: "HuggingFace",
+    version: "v1",
+    role: "Policy Guard",
+    releaseDate: "2025-11-02",
+    specialty: "정책/톤 제어",
+    domain: "리스크/안전",
+    summary: "지시 이행과 정책 준수 시나리오에 적합",
   },
 ];
 
@@ -661,6 +699,7 @@ function buildDefaultRunRow(unitId: string, modelId: string, sampleId: string): 
     sampleId,
     predictedOutput: "",
     observedOutput: "",
+    reviewedOutput: "",
     editRate: 0,
     confidenceScore: 0,
     errorRate: 0,
@@ -670,6 +709,9 @@ function buildDefaultRunRow(unitId: string, modelId: string, sampleId: string): 
     recall: 0,
     precision: 0,
     f1Score: 0,
+    errorReason: undefined,
+    errorReasonDetail: "",
+    providerStatus: undefined,
   };
 }
 
@@ -838,6 +880,40 @@ function safeDiv(value: number, denominator: number) {
   return denominator > 0 ? value / denominator : 0;
 }
 
+function levenshteinDistance(a: string, b: string) {
+  if (a === b) return 0;
+  const alen = a.length;
+  const blen = b.length;
+  if (alen === 0) return blen;
+  if (blen === 0) return alen;
+  const dp: number[] = Array.from({ length: blen + 1 }, (_, j) => j);
+  for (let i = 1; i <= alen; i += 1) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= blen; j += 1) {
+      const tmp = dp[j];
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[j] = Math.min(
+        dp[j] + 1,
+        dp[j - 1] + 1,
+        prev + cost
+      );
+      prev = tmp;
+    }
+  }
+  return dp[blen];
+}
+
+function computeEditRatePercent(baseText: string, reviewedText: string) {
+  const base = (baseText ?? "").trim();
+  const reviewed = (reviewedText ?? "").trim();
+  if (!base && !reviewed) return 0;
+  if (!base || !reviewed) return 100;
+  const distance = levenshteinDistance(base, reviewed);
+  const lengthBase = Math.max(base.length, reviewed.length, 1);
+  return Math.min(100, Math.max(0, (distance / lengthBase) * 100));
+}
+
 function formatActionTime(d = new Date()) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -948,7 +1024,12 @@ export default function ProjectPocReviewPage() {
     }, {})
   );
   const [modelCatalog] = useState<ModelOption[]>(MOCK_MODEL_OPTIONS);
-  const [selectedModelIds] = useState<string[]>(() => MOCK_MODEL_OPTIONS.slice(0, 3).map((model) => model.id));
+  const [specializedModelIdByUnit, setSpecializedModelIdByUnit] = useState<Record<string, string>>(() =>
+    STEP5_TEST_UNIT_ROWS.reduce<Record<string, string>>((acc, row) => {
+      acc[row.unitId] = SPECIALIZED_DEFAULT_MODEL_ID;
+      return acc;
+    }, {})
+  );
   const [samplesByUnit, setSamplesByUnit] = useState<Record<string, SampleInput[]>>(() =>
     STEP5_TEST_UNIT_ROWS.reduce<Record<string, SampleInput[]>>((acc, row) => {
       acc[row.unitId] = [createEmptySample(1)];
@@ -976,6 +1057,7 @@ export default function ProjectPocReviewPage() {
   const [nextRunSeq, setNextRunSeq] = useState(1);
   const [message, setMessage] = useState("");
   const [isRunningTest, setIsRunningTest] = useState(false);
+  const [runningUnitId, setRunningUnitId] = useState<string | null>(null);
   const [activeSampleCell, setActiveSampleCell] = useState<SampleCell | null>(null);
   const [activeSampleHeaderCol, setActiveSampleHeaderCol] = useState<number | null>(null);
   const [sampleSelectionRange, setSampleSelectionRange] = useState<{ start: SampleCell; end: SampleCell } | null>(null);
@@ -991,11 +1073,16 @@ export default function ProjectPocReviewPage() {
   const [csvTagsHeader, setCsvTagsHeader] = useState("");
   const [csvNoteHeader, setCsvNoteHeader] = useState("");
   const [isRunInputExpanded, setIsRunInputExpanded] = useState(false);
+  const [isRawReviewMode, setIsRawReviewMode] = useState(false);
   const testRunResultRef = useRef<HTMLDivElement | null>(null);
+  const [openSpecializedMenuUnitId, setOpenSpecializedMenuUnitId] = useState<string | null>(null);
+  const activeSpecializedMenuRef = useRef<HTMLDivElement | null>(null);
+  const [isStep5StateRestored, setIsStep5StateRestored] = useState(false);
+  const [activeRawModelTab, setActiveRawModelTab] = useState<string>("all");
   const appendDatasetLog = useCallback((unitId: string, text: string) => {
     setDatasetLogByUnit((prev) => {
       const next = [...(prev[unitId] ?? []), `${formatActionTime()} · ${text}`];
-      return { ...prev, [unitId]: next.slice(-3) };
+      return { ...prev, [unitId]: next.slice(-8) };
     });
   }, []);
   const bumpDatasetVersion = useCallback((unitId: string) => {
@@ -1012,6 +1099,107 @@ export default function ProjectPocReviewPage() {
       };
     });
   }, []);
+
+  useEffect(() => {
+    if (!id) return;
+    setIsStep5StateRestored(false);
+    try {
+      const raw = localStorage.getItem(`${STEP5_STATE_STORAGE_PREFIX}${id}`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<Step5PersistedState>;
+      const unitIds = new Set(STEP5_TEST_UNIT_ROWS.map((row) => row.unitId));
+
+      if (typeof parsed.activeTestUnitId === "string" && unitIds.has(parsed.activeTestUnitId)) {
+        setActiveTestUnitId(parsed.activeTestUnitId);
+      }
+      if (parsed.unitProgressById && typeof parsed.unitProgressById === "object") {
+        setUnitProgressById((prev) => ({ ...prev, ...parsed.unitProgressById }));
+      }
+      if (parsed.datasetSourceByUnit && typeof parsed.datasetSourceByUnit === "object") {
+        setDatasetSourceByUnit((prev) => ({ ...prev, ...parsed.datasetSourceByUnit }));
+      }
+      if (parsed.datasetDirtyByUnit && typeof parsed.datasetDirtyByUnit === "object") {
+        setDatasetDirtyByUnit((prev) => ({ ...prev, ...parsed.datasetDirtyByUnit }));
+      }
+      if (parsed.datasetLogByUnit && typeof parsed.datasetLogByUnit === "object") {
+        setDatasetLogByUnit((prev) => ({ ...prev, ...parsed.datasetLogByUnit }));
+      }
+      if (parsed.datasetColumnsByUnit && typeof parsed.datasetColumnsByUnit === "object") {
+        setDatasetColumnsByUnit((prev) => ({ ...prev, ...parsed.datasetColumnsByUnit }));
+      }
+      if (parsed.datasetsByUnit && typeof parsed.datasetsByUnit === "object") {
+        setDatasetsByUnit((prev) => ({ ...prev, ...parsed.datasetsByUnit }));
+      }
+      if (parsed.specializedModelIdByUnit && typeof parsed.specializedModelIdByUnit === "object") {
+        const migrated = Object.fromEntries(
+          Object.entries(parsed.specializedModelIdByUnit).map(([unitId, modelId]) => [
+            unitId,
+            modelId === "llama-3-8b-instruct" ? SPECIALIZED_DEFAULT_MODEL_ID : modelId,
+          ])
+        );
+        setSpecializedModelIdByUnit((prev) => ({ ...prev, ...migrated }));
+      }
+      if (parsed.samplesByUnit && typeof parsed.samplesByUnit === "object") {
+        setSamplesByUnit((prev) => ({ ...prev, ...parsed.samplesByUnit }));
+      }
+      if (parsed.runRowsByUnit && typeof parsed.runRowsByUnit === "object") {
+        setRunRowsByUnit((prev) => ({ ...prev, ...parsed.runRowsByUnit }));
+      }
+      if (parsed.runRecordsByUnit && typeof parsed.runRecordsByUnit === "object") {
+        setRunRecordsByUnit((prev) => ({ ...prev, ...parsed.runRecordsByUnit }));
+      }
+      if (parsed.rawExecutionRowsByUnit && typeof parsed.rawExecutionRowsByUnit === "object") {
+        setRawExecutionRowsByUnit((prev) => ({ ...prev, ...parsed.rawExecutionRowsByUnit }));
+      }
+      if (typeof parsed.nextRunSeq === "number" && Number.isFinite(parsed.nextRunSeq) && parsed.nextRunSeq > 0) {
+        setNextRunSeq(Math.floor(parsed.nextRunSeq));
+      }
+    } catch {
+      // ignore restore errors
+    } finally {
+      setIsStep5StateRestored(true);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (!id || !isStep5StateRestored) return;
+    const snapshot: Step5PersistedState = {
+      activeTestUnitId,
+      unitProgressById,
+      datasetSourceByUnit,
+      datasetDirtyByUnit,
+      datasetLogByUnit,
+      datasetColumnsByUnit,
+      datasetsByUnit,
+      specializedModelIdByUnit,
+      samplesByUnit,
+      runRowsByUnit,
+      runRecordsByUnit,
+      rawExecutionRowsByUnit,
+      nextRunSeq,
+    };
+    try {
+      localStorage.setItem(`${STEP5_STATE_STORAGE_PREFIX}${id}`, JSON.stringify(snapshot));
+    } catch {
+      // ignore persist errors
+    }
+  }, [
+    id,
+    isStep5StateRestored,
+    activeTestUnitId,
+    unitProgressById,
+    datasetSourceByUnit,
+    datasetDirtyByUnit,
+    datasetLogByUnit,
+    datasetColumnsByUnit,
+    datasetsByUnit,
+    specializedModelIdByUnit,
+    samplesByUnit,
+    runRowsByUnit,
+    runRecordsByUnit,
+    rawExecutionRowsByUnit,
+    nextRunSeq,
+  ]);
 
   const handleCreateSampleSet = useCallback((unitId: string) => {
     const nextSamples = normalizeSampleIds(createSamplesFromTemplate(unitId));
@@ -1076,6 +1264,18 @@ export default function ProjectPocReviewPage() {
   }, [isSelectingRunCells]);
 
   useEffect(() => {
+    if (!openSpecializedMenuUnitId) return;
+    function onPointerDown(e: MouseEvent) {
+      const target = e.target as Node | null;
+      if (activeSpecializedMenuRef.current && target && !activeSpecializedMenuRef.current.contains(target)) {
+        setOpenSpecializedMenuUnitId(null);
+      }
+    }
+    window.addEventListener("mousedown", onPointerDown);
+    return () => window.removeEventListener("mousedown", onPointerDown);
+  }, [openSpecializedMenuUnitId]);
+
+  useEffect(() => {
     const unitId =
       STEP5_TEST_UNIT_ROWS.some((row) => row.unitId === activeTestUnitId)
         ? activeTestUnitId
@@ -1087,6 +1287,9 @@ export default function ProjectPocReviewPage() {
       const sampleIds = currentSamples.filter(isSampleRowFilled).map((s) => s.id.trim()).filter(Boolean);
       const prevMap = new Map(prevRows.map((row) => [row.key, row]));
       const nextRows: PocRunRow[] = [];
+      const selectedModelIds = [BASELINE_MODEL_ID, LOW_COST_MODEL_ID];
+      const specializedModelId = specializedModelIdByUnit[unitId];
+      if (specializedModelId) selectedModelIds.push(specializedModelId);
       selectedModelIds.forEach((modelId) => {
         sampleIds.forEach((sampleId) => {
           const key = `${unitId}::${modelId}::${sampleId}`;
@@ -1101,9 +1304,13 @@ export default function ProjectPocReviewPage() {
       if (nextRows.length === 0 && prevRows.length === 0) return prev;
       return { ...prev, [unitId]: nextRows };
     });
-  }, [activeTestUnitId, samplesByUnit, selectedModelIds]);
+  }, [activeTestUnitId, samplesByUnit, specializedModelIdByUnit]);
 
   const modelMap = useMemo(() => new Map(modelCatalog.map((model) => [model.id, model])), [modelCatalog]);
+  const specializedModelOptions = useMemo(
+    () => modelCatalog.filter((model) => model.provider.toLowerCase().includes("huggingface")),
+    [modelCatalog]
+  );
   const normalizedActiveTestUnitId = useMemo(
     () =>
       STEP5_TEST_UNIT_ROWS.some((row) => row.unitId === activeTestUnitId)
@@ -1111,10 +1318,27 @@ export default function ProjectPocReviewPage() {
         : (STEP5_TEST_UNIT_ROWS[0]?.unitId ?? ""),
     [activeTestUnitId]
   );
+  const getSelectedModelIdsForUnit = useCallback(
+    (unitId: string) => {
+      const ids = [BASELINE_MODEL_ID, LOW_COST_MODEL_ID];
+      const specializedModelId = specializedModelIdByUnit[unitId];
+      if (specializedModelId) ids.push(specializedModelId);
+      return ids;
+    },
+    [specializedModelIdByUnit]
+  );
+  const activeSelectedModelIds = useMemo(
+    () => getSelectedModelIdsForUnit(normalizedActiveTestUnitId),
+    [getSelectedModelIdsForUnit, normalizedActiveTestUnitId]
+  );
   const samples = useMemo(() => samplesByUnit[normalizedActiveTestUnitId] ?? [], [normalizedActiveTestUnitId, samplesByUnit]);
   const runRows = useMemo(() => runRowsByUnit[normalizedActiveTestUnitId] ?? [], [normalizedActiveTestUnitId, runRowsByUnit]);
   const sampleMap = useMemo(() => new Map(samples.map((sample) => [sample.id, sample])), [samples]);
   const sampleDisplayMap = useMemo(() => new Map(samples.map((sample, idx) => [sample.id, sample.savedId || `임시-${idx + 1}`])), [samples]);
+  const activeHasCompletedTestRun = useMemo(() => {
+    const latestLog = (datasetLogByUnit[normalizedActiveTestUnitId] ?? [])[0] ?? "";
+    return latestLog.includes("TEST Run 완료");
+  }, [datasetLogByUnit, normalizedActiveTestUnitId]);
   const activeDataset = useMemo(
     () =>
       (normalizedActiveTestUnitId ? datasetsByUnit[normalizedActiveTestUnitId] : null) ?? {
@@ -1124,21 +1348,42 @@ export default function ProjectPocReviewPage() {
       },
     [datasetsByUnit, normalizedActiveTestUnitId]
   );
-  const sampleSetModelSlots = useMemo(
-    () =>
-      selectedModelIds.map((modelId, idx) => {
-        const slot: ModelStrategySlot = idx === 0 ? "baseline" : idx === 1 ? "lowCost" : "specialized";
-        const model = modelMap.get(modelId);
-        return {
-          slot,
-          slotLabel: MODEL_STRATEGY_SLOT_LABELS[slot],
-          modelName: model?.name ?? modelId,
-          provider: model?.provider ?? "-",
-          version: model?.version ?? "-",
-        };
-      }),
-    [modelMap, selectedModelIds]
-  );
+  const getModelSlotsForUnit = useCallback((unitId: string) => {
+    const baseline = modelMap.get(BASELINE_MODEL_ID);
+    const lowCost = modelMap.get(LOW_COST_MODEL_ID);
+    const specializedModelId = specializedModelIdByUnit[unitId];
+    const specialized = specializedModelId ? modelMap.get(specializedModelId) : null;
+    return [
+      {
+        slot: "baseline" as const,
+        slotLabel: MODEL_STRATEGY_SLOT_LABELS.baseline,
+        modelName: baseline?.name ?? BASELINE_MODEL_ID,
+        provider: baseline?.provider ?? "-",
+        version: baseline?.version ?? "-",
+      },
+      {
+        slot: "lowCost" as const,
+        slotLabel: MODEL_STRATEGY_SLOT_LABELS.lowCost,
+        modelName: lowCost?.name ?? LOW_COST_MODEL_ID,
+        provider: lowCost?.provider ?? "-",
+        version: lowCost?.version ?? "-",
+      },
+      {
+        slot: "specialized" as const,
+        slotLabel: MODEL_STRATEGY_SLOT_LABELS.specialized,
+        modelName: specialized?.name ?? "선택 안함",
+        provider: specialized?.provider ?? "-",
+        version: specialized?.version ?? "-",
+      },
+    ];
+  }, [modelMap, specializedModelIdByUnit]);
+  const runContextModelsText = useMemo(() => {
+    const baseline = modelMap.get(BASELINE_MODEL_ID)?.name ?? BASELINE_MODEL_ID;
+    const lowCost = modelMap.get(LOW_COST_MODEL_ID)?.name ?? LOW_COST_MODEL_ID;
+    const specializedModelId = specializedModelIdByUnit[normalizedActiveTestUnitId];
+    const specialized = specializedModelId ? modelMap.get(specializedModelId)?.name ?? specializedModelId : "선택 안함";
+    return `${baseline} / ${lowCost} / ${specialized}`;
+  }, [modelMap, normalizedActiveTestUnitId, specializedModelIdByUnit]);
   const scenarioMetricLines = useCallback(
     (metrics: string[]) =>
       metrics
@@ -1149,7 +1394,7 @@ export default function ProjectPocReviewPage() {
   );
 
   const core10ByModel = useMemo(() => {
-    return selectedModelIds.map((modelId) => {
+    return activeSelectedModelIds.map((modelId) => {
       const rows = runRows.filter((row) => row.modelId === modelId);
       const count = rows.length || 1;
       const avgPolicyViolationRate = rows.reduce((acc, row) => acc + row.policyViolationRate, 0) / count;
@@ -1172,16 +1417,17 @@ export default function ProjectPocReviewPage() {
         decision: evaluateDecision(avg),
       };
     });
-  }, [modelMap, runRows, selectedModelIds]);
+  }, [activeSelectedModelIds, modelMap, runRows]);
 
   const testRunBaseRows = useMemo(() => {
-    const records = runRecordsByUnit[normalizedActiveTestUnitId] ?? [];
-    const rawRows = rawExecutionRowsByUnit[normalizedActiveTestUnitId] ?? [];
+    const records = activeHasCompletedTestRun ? (runRecordsByUnit[normalizedActiveTestUnitId] ?? []) : [];
+    const rawRows = activeHasCompletedTestRun ? (rawExecutionRowsByUnit[normalizedActiveTestUnitId] ?? []) : [];
+    const fallbackSampleCount = (samplesByUnit[normalizedActiveTestUnitId] ?? []).filter(isSampleRowFilled).length;
     if (records.length === 0) {
       return core10ByModel.map((row, idx) => ({
         testRunId: `R-${String(idx + 1).padStart(3, "0")}`,
         modelName: row.modelName,
-        sampleCount: 0,
+        sampleCount: fallbackSampleCount,
         datasetVersion: activeDataset.version,
         editRate: row.editRate,
         precision: row.precision,
@@ -1207,22 +1453,34 @@ export default function ProjectPocReviewPage() {
       if (!prev || prev.runId < record.runId) latestRunByModel.set(record.modelId, record);
     });
 
-    return selectedModelIds.map((modelId, idx) => {
+    return activeSelectedModelIds.map((modelId, idx) => {
       const model = modelMap.get(modelId);
       const record = latestRunByModel.get(modelId);
       const scopedRows = record ? rawRows.filter((row) => row.runId === record.runId) : [];
-      const count = scopedRows.length || 1;
+      const rawSampleCount = scopedRows.length;
+      const recordSampleCount = record?.sampleCount ?? 0;
+      const resolvedSampleCount =
+        recordSampleCount > 0 ? recordSampleCount : rawSampleCount > 0 ? rawSampleCount : records.length > 0 ? fallbackSampleCount : 0;
+      const successRows = scopedRows.filter((row) => row.error === 0);
+      const successCount = successRows.length;
+      const count = successCount || 1;
+      const errorRate = scopedRows.length > 0 ? safeDiv(scopedRows.reduce((acc, row) => acc + row.error, 0), scopedRows.length) * 100 : 0;
+      const policyViolationRate =
+        successCount > 0 ? safeDiv(successRows.reduce((acc, row) => acc + row.policyFlag, 0), successCount) * 100 : 0;
       const avg = {
-        editRate: scopedRows.reduce((acc, row) => acc + Number(row.predictedOutput !== row.expectedOutput), 0) / count * 100,
-        precision: safeDiv(scopedRows.reduce((acc, row) => acc + (row.policyFlag === 0 ? 1 : 0), 0), count),
-        recall: safeDiv(scopedRows.reduce((acc, row) => acc + (row.policyFlag === 0 ? 1 : 0), 0), count),
-        f1Score: safeDiv(scopedRows.reduce((acc, row) => acc + (row.policyFlag === 0 ? 1 : 0), 0), count),
-        requirementPassRate: 100 - safeDiv(scopedRows.reduce((acc, row) => acc + row.policyFlag, 0), count) * 100,
-        policyViolationRate: safeDiv(scopedRows.reduce((acc, row) => acc + row.policyFlag, 0), count) * 100,
-        errorRate: safeDiv(scopedRows.reduce((acc, row) => acc + row.error, 0), count) * 100,
-        averageLatency: safeDiv(scopedRows.reduce((acc, row) => acc + row.latency, 0), count),
-        costPerRequest: safeDiv(scopedRows.reduce((acc, row) => acc + row.cost, 0), count),
-        tokenUsage: scopedRows.reduce((acc, row) => acc + row.tokenUsage, 0),
+        editRate:
+          successCount > 0
+            ? successRows.reduce((acc, row) => acc + Number(row.predictedOutput !== row.expectedOutput), 0) / count * 100
+            : 0,
+        precision: successCount > 0 ? safeDiv(successRows.reduce((acc, row) => acc + (row.policyFlag === 0 ? 1 : 0), 0), count) : 0,
+        recall: successCount > 0 ? safeDiv(successRows.reduce((acc, row) => acc + (row.policyFlag === 0 ? 1 : 0), 0), count) : 0,
+        f1Score: successCount > 0 ? safeDiv(successRows.reduce((acc, row) => acc + (row.policyFlag === 0 ? 1 : 0), 0), count) : 0,
+        requirementPassRate: successCount > 0 ? 100 - policyViolationRate : 0,
+        policyViolationRate,
+        errorRate,
+        averageLatency: successCount > 0 ? safeDiv(successRows.reduce((acc, row) => acc + row.latency, 0), count) : 0,
+        costPerRequest: successCount > 0 ? safeDiv(successRows.reduce((acc, row) => acc + row.cost, 0), count) : 0,
+        tokenUsage: successRows.reduce((acc, row) => acc + row.tokenUsage, 0),
       };
       const automationRate = Math.max(0, 100 - avg.editRate);
       const processingTimeReduction = Math.max(0, Math.min(60, 30 - avg.averageLatency / 100));
@@ -1231,7 +1489,7 @@ export default function ProjectPocReviewPage() {
       return {
         testRunId: record?.runId ?? `R-${String(idx + 1).padStart(3, "0")}`,
         modelName: model?.name ?? modelId,
-        sampleCount: record?.sampleCount ?? 0,
+        sampleCount: resolvedSampleCount,
         datasetVersion: record?.datasetVersion ?? activeDataset.version,
         ...avg,
         manualInterventionRate: Math.max(0.5, avg.editRate * 0.2),
@@ -1248,7 +1506,9 @@ export default function ProjectPocReviewPage() {
     normalizedActiveTestUnitId,
     rawExecutionRowsByUnit,
     runRecordsByUnit,
-    selectedModelIds,
+    activeSelectedModelIds,
+    samplesByUnit,
+    activeHasCompletedTestRun,
   ]);
   const activeTestUnit = useMemo(
     () => STEP5_TEST_UNIT_ROWS.find((row) => row.unitId === normalizedActiveTestUnitId) ?? STEP5_TEST_UNIT_ROWS[0],
@@ -1280,12 +1540,6 @@ export default function ProjectPocReviewPage() {
     () => VIEW_TABS.find((tab) => tab.key === effectiveViewTab) ?? VIEW_TABS[0],
     [effectiveViewTab]
   );
-  const activeViewLabelEn = useMemo(() => {
-    if (effectiveViewTab === "experiment") return "Experiment";
-    if (effectiveViewTab === "release") return "Release";
-    if (effectiveViewTab === "operational") return "Operational";
-    return "Scale-up";
-  }, [effectiveViewTab]);
   const activeViewMetricKeys = useMemo(
     () => activeMetricKeys.filter((key) => METRIC_DEFINITIONS[key].dimension === effectiveViewTab),
     [activeMetricKeys, effectiveViewTab]
@@ -1301,6 +1555,48 @@ export default function ProjectPocReviewPage() {
     const dims = new Set(activeMetricKeys.map((key) => METRIC_DEFINITIONS[key].dimension));
     return order.filter((k) => dims.has(k)).map((k) => labelMap[k]);
   }, [activeMetricKeys]);
+  const hasRunnableSamplesByUnit = useMemo(() => {
+    return STEP5_TEST_UNIT_ROWS.reduce<Record<string, boolean>>((acc, row) => {
+      const unitSamples = samplesByUnit[row.unitId] ?? [];
+      acc[row.unitId] = unitSamples.some(isSampleRowFilled);
+      return acc;
+    }, {});
+  }, [samplesByUnit]);
+  const hasCompletedTestRunByUnit = useMemo(() => {
+    return STEP5_TEST_UNIT_ROWS.reduce<Record<string, boolean>>((acc, row) => {
+      const logs = datasetLogByUnit[row.unitId] ?? [];
+      const latestDataSaveIdx = logs.reduce((latest, log, idx) => (log.includes("결과 저장 완료") ? idx : latest), -1);
+      const latestTestRunIdx = logs.reduce((latest, log, idx) => (log.includes("TEST Run 완료") ? idx : latest), -1);
+      acc[row.unitId] = latestTestRunIdx >= 0 && latestTestRunIdx > latestDataSaveIdx;
+      return acc;
+    }, {});
+  }, [datasetLogByUnit]);
+  const recentStatusByUnit = useMemo(() => {
+    return STEP5_TEST_UNIT_ROWS.reduce<
+      Record<string, { latestDataSave: string | null; latestTestRun: string | null }>
+    >((acc, row) => {
+      const logs = datasetLogByUnit[row.unitId] ?? [];
+      const latestDataSave = [...logs].reverse().find((log) => log.includes("결과 저장 완료")) ?? null;
+      const latestTestRun = [...logs].reverse().find((log) => log.includes("TEST Run 완료")) ?? null;
+      acc[row.unitId] = { latestDataSave, latestTestRun };
+      return acc;
+    }, {});
+  }, [datasetLogByUnit]);
+  const rawModelTabs = useMemo(() => {
+    const tabs = [{ id: "all", label: "전체 모델" }];
+    for (const modelId of activeSelectedModelIds) {
+      tabs.push({ id: modelId, label: modelMap.get(modelId)?.name ?? modelId });
+    }
+    return tabs;
+  }, [activeSelectedModelIds, modelMap]);
+  const displayedRunRows = useMemo(
+    () => (activeRawModelTab === "all" ? runRows : runRows.filter((row) => row.modelId === activeRawModelTab)),
+    [activeRawModelTab, runRows]
+  );
+  useEffect(() => {
+    if (rawModelTabs.some((tab) => tab.id === activeRawModelTab)) return;
+    setActiveRawModelTab("all");
+  }, [activeRawModelTab, rawModelTabs]);
   const filledSampleCount = useMemo(() => samples.filter(isSampleRowFilled).length, [samples]);
   const runContextTask = useMemo(
     () => extractTaskTypeKey(activeTestUnit?.aiTaskType ?? ""),
@@ -1361,6 +1657,10 @@ export default function ProjectPocReviewPage() {
     const metricHeaders = activeViewMetricKeys.map((key) => METRIC_DEFINITIONS[key].label);
     const headers = metricHeaders.length > 0 ? [...baseHeaders, ...metricHeaders] : [...baseHeaders, "안내"];
     const formatMetricValue = (row: (typeof testRunBaseRows)[number], key: MetricKey) => {
+      const noSuccessfulResult = row.sampleCount > 0 && row.errorRate >= 99.9;
+      if (noSuccessfulResult && (key === "policyPassRate" || key === "precision" || key === "recall" || key === "f1Score")) {
+        return "-";
+      }
       if (key === "tokenUsage") return row.tokenUsage.toLocaleString();
       if (key === "averageLatency") return `${row.averageLatency.toFixed(0)}ms`;
       if (key === "costPerRequest") return `$${row.costPerRequest.toFixed(3)}`;
@@ -1736,7 +2036,7 @@ export default function ProjectPocReviewPage() {
         ...prev,
         [normalizedActiveTestUnitId]: current.map((row) => {
           if (row.key !== key) return row;
-          if (field === "predictedOutput" || field === "observedOutput") {
+          if (field === "predictedOutput" || field === "observedOutput" || field === "reviewedOutput") {
             return { ...row, [field]: value };
           }
           const numeric = Number(value);
@@ -1746,8 +2046,27 @@ export default function ProjectPocReviewPage() {
     });
   }
 
+  function handleSaveReviewedOutputs() {
+    if (!normalizedActiveTestUnitId) return;
+    setRunRowsByUnit((prev) => {
+      const current = prev[normalizedActiveTestUnitId] ?? [];
+      const next = current.map((row) => {
+        const reviewed = row.reviewedOutput?.trim() ? row.reviewedOutput : row.observedOutput;
+        return {
+          ...row,
+          reviewedOutput: reviewed,
+          editRate: computeEditRatePercent(row.observedOutput, reviewed),
+        };
+      });
+      return { ...prev, [normalizedActiveTestUnitId]: next };
+    });
+    setIsRawReviewMode(false);
+    setMessage("검수 저장 완료: 수정 비율(Edit Rate) 반영");
+  }
+
   const runColKeys: Array<keyof PocRunRow> = [
     "observedOutput",
+    "reviewedOutput",
     "editRate",
     "confidenceScore",
     "errorRate",
@@ -1760,7 +2079,7 @@ export default function ProjectPocReviewPage() {
   ];
 
   function isRunNumericField(field: keyof PocRunRow) {
-    return field !== "observedOutput";
+    return field !== "observedOutput" && field !== "reviewedOutput";
   }
 
   function isActiveRunCell(row: number, col: RunColIndex) {
@@ -1837,7 +2156,7 @@ export default function ProjectPocReviewPage() {
         const row = { ...next[rowIndex] };
         for (let c = 0; c < grid[r].length; c += 1) {
           const colIndex = startCol + c;
-          if (colIndex > 9) break;
+          if (colIndex > 10) break;
           const field = runColKeys[colIndex as RunColIndex];
           const raw = grid[r][c];
           if (isRunNumericField(field)) {
@@ -1860,8 +2179,6 @@ export default function ProjectPocReviewPage() {
     const currentDataset = datasetsByUnit[unitId];
     const dirty = datasetDirtyByUnit[unitId] ?? false;
     const nextDatasetVersion = currentDataset ? (dirty ? currentDataset.version + 1 : currentDataset.version) : 1;
-    const validSamples = samples.filter(isSampleRowFilled);
-    const now = formatActionTime();
 
     setSamplesByUnit((prev) => {
       const current = prev[unitId] ?? [];
@@ -1877,82 +2194,34 @@ export default function ProjectPocReviewPage() {
       setDatasetDirtyByUnit((prev) => ({ ...prev, [unitId]: false }));
     }
 
-    const runIdEntries = selectedModelIds.map((modelId, idx) => ({
-      modelId,
-      runId: `R-${String(nextRunSeq + idx).padStart(3, "0")}`,
-    }));
-    if (runIdEntries.length > 0 && validSamples.length > 0) {
-      setRunRecordsByUnit((prev) => {
-        const current = prev[unitId] ?? [];
-        const nextRecords: RunRecord[] = runIdEntries.map(({ modelId, runId }) => ({
-          runId,
-          taskId: unitMeta?.taskId ?? unitId,
-          unitId,
-          datasetId: currentDataset?.id ?? unitMeta?.datasetId ?? "D-000",
-          datasetVersion: nextDatasetVersion,
-          modelId,
-          createdAt: now,
-          sampleCount: validSamples.length,
-        }));
-        return { ...prev, [unitId]: [...current, ...nextRecords] };
-      });
-      const runIdByModel = new Map(runIdEntries.map((entry) => [entry.modelId, entry.runId]));
-      const runRowByModelSample = new Map(
-        runRows.map((row) => [`${row.modelId}::${row.sampleId}`, row] as const)
-      );
-      setRawExecutionRowsByUnit((prev) => {
-        const current = prev[unitId] ?? [];
-        const nextRaw: RawExecutionRow[] = [];
-        selectedModelIds.forEach((modelId) => {
-          const runId = runIdByModel.get(modelId);
-          if (!runId) return;
-          validSamples.forEach((sample) => {
-            const runRow = runRowByModelSample.get(`${modelId}::${sample.id}`);
-            nextRaw.push({
-              runId,
-              sampleId: sample.id,
-              modelId,
-              input: sample.input,
-              expectedOutput: sample.expectedOutput,
-              predictedOutput: runRow?.observedOutput ?? "",
-              latency: runRow?.averageLatency ?? 0,
-              cost: runRow?.costPerRequest ?? 0,
-              tokenUsage: Math.max(0, Math.round((runRow?.observedOutput || "").length * 3)),
-              error: (runRow?.errorRate ?? 0) > 0 ? 1 : 0,
-              policyFlag: (runRow?.policyViolationRate ?? 0) > 0 ? 1 : 0,
-            });
-          });
-        });
-        return { ...prev, [unitId]: [...current, ...nextRaw] };
-      });
-      setNextRunSeq((prev) => prev + runIdEntries.length);
-    }
-
     const source = datasetSourceByUnit[unitId];
     const sourceLabel = source === "csv" ? "CSV" : source === "ai" ? "자동 생성" : "직접 입력";
     appendDatasetLog(unitId, `${sourceLabel} · 결과 저장 완료 (v${nextDatasetVersion})`);
     setMessage(
-      `결과 저장 완료: 태스크 ${unitMeta?.taskId ?? "-"} / 데이터셋 ${(currentDataset?.id ?? unitMeta?.datasetId) || "-"} v${nextDatasetVersion} / 런 ${runIdEntries.map((r) => r.runId).join(", ")}`
+      `결과 저장 완료: 태스크 ${unitMeta?.taskId ?? "-"} / 데이터셋 ${(currentDataset?.id ?? unitMeta?.datasetId) || "-"} v${nextDatasetVersion}`
     );
   }
 
-  async function handleRunTest() {
-    if (!normalizedActiveTestUnitId || isRunningTest) return;
-    const unitId = normalizedActiveTestUnitId;
+  async function runTestByUnit(unitId: string) {
+    if (!unitId || isRunningTest) return;
     const unitMeta = STEP5_TEST_UNIT_ROWS.find((row) => row.unitId === unitId);
     if (!unitMeta) return;
-    const validSamples = samples.filter(isSampleRowFilled);
+    const unitSamples = samplesByUnit[unitId] ?? [];
+    const validSamples = unitSamples.filter(isSampleRowFilled);
     if (validSamples.length === 0) {
-      setMessage("실행할 샘플이 없습니다. 데이터셋을 먼저 입력해 주세요.");
+      setMessage(`${unitMeta.taskId}: 실행할 샘플이 없습니다. 데이터셋을 먼저 입력해 주세요.`);
       return;
     }
+    const selectedModelIds = getSelectedModelIdsForUnit(unitId);
     if (selectedModelIds.length === 0) {
-      setMessage("실행할 모델이 없습니다.");
+      setMessage(`${unitMeta.taskId}: 실행할 모델이 없습니다.`);
       return;
     }
 
+    setActiveTestUnitId(unitId);
     setIsRunningTest(true);
-    setMessage("TEST Run 실행 중...");
+    setRunningUnitId(unitId);
+    setMessage(`${unitMeta.taskId} TEST Run 실행 중...`);
     try {
       const response = await fetch("/api/poc-run", {
         method: "POST",
@@ -1960,6 +2229,7 @@ export default function ProjectPocReviewPage() {
         body: JSON.stringify({
           taskId: unitMeta.taskId,
           unitId,
+          datasetId: datasetsByUnit[unitId]?.id ?? unitMeta.datasetId,
           aiTaskType: extractTaskTypeKey(unitMeta.aiTaskType),
           metricPack: unitMeta.metricPack,
           models: selectedModelIds.map((modelId) => {
@@ -1988,11 +2258,16 @@ export default function ProjectPocReviewPage() {
         rows?: Array<{
           sampleId: string;
           modelId: string;
+          datasetId?: string;
           predictedOutput: string;
           latencyMs: number;
           cost: number;
+          isEstimatedCost?: boolean;
           tokenUsage: number;
           error: boolean;
+          errorReason?: "HF_GATED" | "PROVIDER_ERROR" | "UNSUPPORTED_PROVIDER" | "UNKNOWN";
+          errorReasonDetail?: string;
+          providerStatus?: number;
           policyPass: boolean;
           violation: boolean;
         }>;
@@ -2001,6 +2276,9 @@ export default function ProjectPocReviewPage() {
         throw new Error(payload.error || "TEST Run 실패");
       }
       const resultRows = payload.rows ?? [];
+      if (resultRows.length === 0) {
+        throw new Error("TEST Run 결과가 비어 있습니다. provider 응답 또는 모델 매핑을 확인해 주세요.");
+      }
       const resultMap = new Map(resultRows.map((row) => [`${row.modelId}::${row.sampleId}`, row] as const));
 
       setRunRowsByUnit((prev) => {
@@ -2008,20 +2286,31 @@ export default function ProjectPocReviewPage() {
         const next = current.map((row) => {
           const result = resultMap.get(`${row.modelId}::${row.sampleId}`);
           if (!result) return row;
+          const fallbackErrorText =
+            result.errorReasonDetail && result.error
+              ? `[${result.errorReason ?? "UNKNOWN"}] ${result.errorReasonDetail}`
+              : "";
+          const observedOutput = result.predictedOutput || fallbackErrorText;
           return {
             ...row,
-            observedOutput: result.predictedOutput,
+            observedOutput,
+            reviewedOutput: row.reviewedOutput?.trim() ? row.reviewedOutput : observedOutput,
             averageLatency: result.latencyMs,
             costPerRequest: result.cost,
             policyViolationRate: result.violation ? 100 : 0,
             errorRate: result.error ? 100 : 0,
+            errorReason: result.errorReason,
+            errorReasonDetail: result.errorReasonDetail ?? "",
+            providerStatus: result.providerStatus,
           };
         });
         return { ...prev, [unitId]: next };
       });
 
       const now = formatActionTime();
-      const runIdEntries = selectedModelIds.map((modelId, idx) => ({
+      const modelsFromResult = Array.from(new Set(resultRows.map((row) => row.modelId)));
+      const modelsForRecord = modelsFromResult.length > 0 ? modelsFromResult : selectedModelIds;
+      const runIdEntries = modelsForRecord.map((modelId, idx) => ({
         modelId,
         runId: `R-${String(nextRunSeq + idx).padStart(3, "0")}`,
       }));
@@ -2035,7 +2324,7 @@ export default function ProjectPocReviewPage() {
           datasetVersion: datasetsByUnit[unitId]?.version ?? 1,
           modelId,
           createdAt: now,
-          sampleCount: validSamples.length,
+          sampleCount: resultRows.filter((row) => row.modelId === modelId).length || validSamples.length,
         }));
         return { ...prev, [unitId]: [...current, ...nextRecords] };
       });
@@ -2059,20 +2348,38 @@ export default function ProjectPocReviewPage() {
             tokenUsage: row.tokenUsage,
             error: row.error ? 1 : 0,
             policyFlag: row.violation ? 1 : 0,
+            errorReason: row.errorReason,
+            errorReasonDetail: row.errorReasonDetail,
+            providerStatus: row.providerStatus,
           });
         });
         return { ...prev, [unitId]: [...current, ...nextRaw] };
       });
+      if (resultRows.some((row) => row.errorReason === "HF_GATED")) {
+        setMessage(`${unitMeta.taskId} TEST Run 완료 (일부 실패: HF gated 모델 승인 필요)`);
+      }
       setNextRunSeq((prev) => prev + runIdEntries.length);
       setUnitProgressById((prev) => ({ ...prev, [unitId]: "saved" }));
       appendDatasetLog(unitId, `TEST Run 완료 · ${payload.mode === "mock" ? "Mock" : "Live"} · 샘플 ${validSamples.length}개`);
-      setMessage(`TEST Run 완료 (${payload.mode === "mock" ? "Mock" : "Live"})`);
+      if (!resultRows.some((row) => row.errorReason === "HF_GATED")) {
+        setMessage(`${unitMeta.taskId} TEST Run 완료 (${payload.mode === "mock" ? "Mock" : "Live"})`);
+      }
+      setIsRunInputExpanded(true);
+      requestAnimationFrame(() => {
+        testRunResultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     } catch (error) {
       const text = error instanceof Error ? error.message : "TEST Run 실패";
       setMessage(text);
     } finally {
       setIsRunningTest(false);
+      setRunningUnitId(null);
     }
+  }
+
+  async function handleRunTest() {
+    if (!normalizedActiveTestUnitId) return;
+    await runTestByUnit(normalizedActiveTestUnitId);
   }
 
   async function handleCopyPrompt() {
@@ -2141,28 +2448,110 @@ export default function ProjectPocReviewPage() {
                     </td>
                     <td style={selectedCellStyle}>
                       <div style={scenarioModelCardsWrapStyle}>
-                        {sampleSetModelSlots.map((slot) => (
-                          <div key={`${row.unitId}-${slot.slot}`} style={scenarioModelCardStyle}>
-                            <div style={scenarioModelLineStyle}>
-                              {(slot.slot === "baseline"
-                                ? "기준 모델 (Baseline)"
-                                : slot.slot === "lowCost"
-                                  ? "저비용 모델 (Low Cost)"
-                                  : "특화 모델 (Specialized)")}{" "}
-                              · {slot.modelName} · {slot.provider} · {slot.version}
+                        {getModelSlotsForUnit(row.unitId).map((slot) => {
+                          const isSpecialized = slot.slot === "specialized";
+                          return (
+                            <div
+                              key={`${row.unitId}-${slot.slot}`}
+                              style={scenarioModelCardStyle}
+                            >
+                              {!isSpecialized ? (
+                                <div style={scenarioModelLineStyle}>
+                                  {(slot.slot === "baseline" ? "기준 모델 (Baseline)" : "저비용 모델 (Low Cost)")} · {slot.modelName}
+                                  {" · "}
+                                  {slot.provider} · {slot.version}
+                                </div>
+                              ) : (
+                                <div
+                                  ref={openSpecializedMenuUnitId === row.unitId ? activeSpecializedMenuRef : null}
+                                  style={scenarioModelSelectWrapStyle}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenSpecializedMenuUnitId((prev) => (prev === row.unitId ? null : row.unitId));
+                                    }}
+                                    style={scenarioModelSelectStyle}
+                                    aria-label="특화 모델 (Specialized) 선택"
+                                  >
+                                    <span>
+                                      {`특화 모델 (Specialized) · ${slot.modelName}${slot.provider !== "-" ? ` · ${slot.provider}` : ""}${slot.version !== "-" ? ` · ${slot.version}` : ""}`}
+                                    </span>
+                                    <span style={scenarioModelSelectCaretStyle}>▾</span>
+                                  </button>
+                                  {openSpecializedMenuUnitId === row.unitId && (
+                                    <div style={scenarioModelSelectMenuStyle}>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSpecializedModelIdByUnit((prev) => ({ ...prev, [row.unitId]: "" }));
+                                          setOpenSpecializedMenuUnitId(null);
+                                        }}
+                                        style={{
+                                          ...scenarioModelSelectOptionStyle,
+                                          ...(specializedModelIdByUnit[row.unitId] ? {} : scenarioModelSelectOptionActiveStyle),
+                                        }}
+                                      >
+                                        ✓ 특화 모델 (Specialized) · 선택 안함
+                                      </button>
+                                      {specializedModelOptions.map((model) => {
+                                        const selected = specializedModelIdByUnit[row.unitId] === model.id;
+                                        return (
+                                          <button
+                                            key={model.id}
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setSpecializedModelIdByUnit((prev) => ({ ...prev, [row.unitId]: model.id }));
+                                              setOpenSpecializedMenuUnitId(null);
+                                            }}
+                                            style={{
+                                              ...scenarioModelSelectOptionStyle,
+                                              ...(selected ? scenarioModelSelectOptionActiveStyle : {}),
+                                            }}
+                                          >
+                                            {`${selected ? "✓ " : ""}특화 모델 (Specialized) · ${model.name} · ${model.provider} · ${model.version}`}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </td>
                     <td style={{ ...selectedCellStyle, minWidth: 260 }}>
+                      <div style={{ marginBottom: 8 }}>
+                        {hasRunnableSamplesByUnit[row.unitId] ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void runTestByUnit(row.unitId);
+                            }}
+                            style={buttonStyle}
+                            disabled={isRunningTest || hasCompletedTestRunByUnit[row.unitId]}
+                            title={hasCompletedTestRunByUnit[row.unitId] ? "이미 TEST Run을 실행했습니다." : undefined}
+                          >
+                            {runningUnitId === row.unitId ? "실행 중..." : "TEST Run"}
+                          </button>
+                        ) : null}
+                      </div>
                       <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
-                        {(datasetLogByUnit[row.unitId] ?? []).length > 0 ? (
-                          (datasetLogByUnit[row.unitId] ?? []).map((log, idx) => (
-                            <div key={`${row.unitId}-log-${idx}`}>• {log}</div>
-                          ))
+                        {recentStatusByUnit[row.unitId]?.latestDataSave ? (
+                          <div>• 최근 데이터 저장: {recentStatusByUnit[row.unitId]?.latestDataSave}</div>
                         ) : (
-                          <div>• 실행 기록 없음</div>
+                          <div>• 최근 데이터 저장: 없음</div>
+                        )}
+                        {recentStatusByUnit[row.unitId]?.latestTestRun ? (
+                          <div>• 최근 테스트 실행: {recentStatusByUnit[row.unitId]?.latestTestRun}</div>
+                        ) : (
+                          <div>• 최근 테스트 실행: 없음</div>
                         )}
                       </div>
                     </td>
@@ -2390,7 +2779,16 @@ export default function ProjectPocReviewPage() {
         <div ref={testRunResultRef} style={cardStyle}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
             <h3 style={{ ...cardTitleStyle, margin: 0 }}>테스트 결과</h3>
-            <button type="button" onClick={handleRunTest} style={buttonStyle} disabled={isRunningTest}>
+            <button
+              type="button"
+              onClick={handleRunTest}
+              style={buttonStyle}
+              disabled={
+                isRunningTest ||
+                !hasRunnableSamplesByUnit[normalizedActiveTestUnitId] ||
+                hasCompletedTestRunByUnit[normalizedActiveTestUnitId]
+              }
+            >
               {isRunningTest ? "TEST Run 실행 중..." : "TEST Run"}
             </button>
           </div>
@@ -2422,8 +2820,7 @@ export default function ProjectPocReviewPage() {
           </div>
           <div style={runContextCardStyle}>
             <div style={runContextTitleStyle}>
-              {activeViewLabelEn}
-              <span style={{ color: "#475569", fontWeight: 700, marginLeft: 8 }}>{activeTestUnit?.featureName} 모델 비교</span>
+              <span style={{ color: "#475569", fontWeight: 700 }}>{activeTestUnit?.featureName} 모델 비교</span>
             </div>
             <div style={runContextGridStyle}>
               <div><strong style={runContextKeyStyle}>태스크 (Task)</strong><div>{runContextTask}</div></div>
@@ -2435,7 +2832,7 @@ export default function ProjectPocReviewPage() {
               </div>
               <div>
                 <strong style={runContextKeyStyle}>모델 (Models)</strong>
-                <div>Baseline / Low Cost / Specialized</div>
+                <div>{runContextModelsText}</div>
               </div>
               <div>
                 <strong style={runContextKeyStyle}>지표 팩 (Metric Pack)</strong>
@@ -2472,7 +2869,33 @@ export default function ProjectPocReviewPage() {
             </table>
           </div>
           <details style={{ marginTop: 10 }} open={isRunInputExpanded} onToggle={(e) => setIsRunInputExpanded((e.currentTarget as HTMLDetailsElement).open)}>
-            <summary style={{ cursor: "pointer", color: "#64748b", fontSize: 12, fontWeight: 700 }}>상세 입력 테이블 보기</summary>
+            <summary style={{ cursor: "pointer", color: "#64748b", fontSize: 12, fontWeight: 700 }}>raw 데이터 보기</summary>
+            <div style={rawReviewActionRowStyle}>
+              {!isRawReviewMode ? (
+                <button type="button" onClick={() => setIsRawReviewMode(true)} style={buttonStyle}>
+                  검수하기
+                </button>
+              ) : (
+                <button type="button" onClick={handleSaveReviewedOutputs} style={buttonStyle} disabled={runInputDisabled}>
+                  검수 저장
+                </button>
+              )}
+            </div>
+            <div style={rawModelTabsWrapStyle}>
+              {rawModelTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveRawModelTab(tab.id)}
+                  style={{
+                    ...rawModelTabButtonStyle,
+                    ...(activeRawModelTab === tab.id ? rawModelTabButtonActiveStyle : {}),
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
             <div style={tableWrapStyle} onKeyDownCapture={handleRunSheetKeyDownCapture}>
             <table style={tableStyle}>
               <thead>
@@ -2481,19 +2904,23 @@ export default function ProjectPocReviewPage() {
                   <th style={thStyle}>샘플</th>
                   <th style={thStyle}>입력</th>
                   <th style={thStyle}>출력 (Output)</th>
+                  <th style={thStyle}>검수 버전 (Reviewed Output)</th>
                   <th style={thStyle}>수정 비율 (Edit Rate)</th>
                   <th style={thStyle}>평균 컨피던스 (Confidence Score)</th>
                   <th style={thStyle}>오류율 (Error Rate)</th>
                   <th style={thStyle}>평균 응답 시간 (Average Latency)</th>
-                  <th style={thStyle}>요청당 비용 (Cost per Request)</th>
+                  <th style={thStyle}>요청당 비용 (Cost per Request, 추정)</th>
                   <th style={thStyle}>정책 위반율 (Policy Violation Rate)</th>
                   <th style={thStyle}>전체 재현율 (Recall)</th>
                   <th style={thStyle}>전체 정밀도 (Precision)</th>
                   <th style={thStyle}>전체 F1 점수 (F1 Score)</th>
+                  <th style={thStyle}>에러 코드 (Error Reason)</th>
+                  <th style={thStyle}>업스트림 상태 (Provider Status)</th>
+                  <th style={thStyle}>에러 상세 (Error Detail)</th>
                 </tr>
               </thead>
               <tbody>
-                {runRows.map((row, rowIndex) => {
+                {displayedRunRows.map((row, rowIndex) => {
                   const model = modelMap.get(row.modelId);
                   const sample = sampleMap.get(row.sampleId);
                   return (
@@ -2515,7 +2942,7 @@ export default function ProjectPocReviewPage() {
                             setRunSelectionRange({ start: { row: rowIndex, col: 0 }, end: { row: rowIndex, col: 0 } });
                           }}
                           onMouseDown={() => startRunCellSelection(rowIndex, 0)}
-                          disabled={runInputDisabled}
+                          disabled
                           style={sheetCellInputStyle}
                         />
                       </td>
@@ -2525,15 +2952,16 @@ export default function ProjectPocReviewPage() {
                         onMouseEnter={() => extendRunCellSelection(rowIndex, 1)}
                       >
                         <input
-                          value={row.editRate}
-                          onChange={(e) => updateRunRow(row.key, "editRate", e.target.value)}
+                          value={row.reviewedOutput}
+                          onChange={(e) => updateRunRow(row.key, "reviewedOutput", e.target.value)}
                           onPaste={(e) => handleRunSheetPaste(rowIndex, 1, e)}
                           onFocus={() => {
                             setActiveRunCell({ row: rowIndex, col: 1 });
                             setRunSelectionRange({ start: { row: rowIndex, col: 1 }, end: { row: rowIndex, col: 1 } });
                           }}
                           onMouseDown={() => startRunCellSelection(rowIndex, 1)}
-                          disabled={runInputDisabled}
+                          disabled={!isRawReviewMode || runInputDisabled}
+                          placeholder={isRawReviewMode ? "검수 결과 입력" : "검수하기 모드에서 입력"}
                           style={sheetCellInputStyle}
                         />
                       </td>
@@ -2543,15 +2971,15 @@ export default function ProjectPocReviewPage() {
                         onMouseEnter={() => extendRunCellSelection(rowIndex, 2)}
                       >
                         <input
-                          value={row.confidenceScore}
-                          onChange={(e) => updateRunRow(row.key, "confidenceScore", e.target.value)}
+                          value={row.editRate}
+                          onChange={(e) => updateRunRow(row.key, "editRate", e.target.value)}
                           onPaste={(e) => handleRunSheetPaste(rowIndex, 2, e)}
                           onFocus={() => {
                             setActiveRunCell({ row: rowIndex, col: 2 });
                             setRunSelectionRange({ start: { row: rowIndex, col: 2 }, end: { row: rowIndex, col: 2 } });
                           }}
                           onMouseDown={() => startRunCellSelection(rowIndex, 2)}
-                          disabled={runInputDisabled}
+                          disabled
                           style={sheetCellInputStyle}
                         />
                       </td>
@@ -2561,8 +2989,8 @@ export default function ProjectPocReviewPage() {
                         onMouseEnter={() => extendRunCellSelection(rowIndex, 3)}
                       >
                         <input
-                          value={row.errorRate}
-                          onChange={(e) => updateRunRow(row.key, "errorRate", e.target.value)}
+                          value={row.confidenceScore}
+                          onChange={(e) => updateRunRow(row.key, "confidenceScore", e.target.value)}
                           onPaste={(e) => handleRunSheetPaste(rowIndex, 3, e)}
                           onFocus={() => {
                             setActiveRunCell({ row: rowIndex, col: 3 });
@@ -2579,8 +3007,8 @@ export default function ProjectPocReviewPage() {
                         onMouseEnter={() => extendRunCellSelection(rowIndex, 4)}
                       >
                         <input
-                          value={row.averageLatency}
-                          onChange={(e) => updateRunRow(row.key, "averageLatency", e.target.value)}
+                          value={row.errorRate}
+                          onChange={(e) => updateRunRow(row.key, "errorRate", e.target.value)}
                           onPaste={(e) => handleRunSheetPaste(rowIndex, 4, e)}
                           onFocus={() => {
                             setActiveRunCell({ row: rowIndex, col: 4 });
@@ -2597,8 +3025,8 @@ export default function ProjectPocReviewPage() {
                         onMouseEnter={() => extendRunCellSelection(rowIndex, 5)}
                       >
                         <input
-                          value={row.costPerRequest}
-                          onChange={(e) => updateRunRow(row.key, "costPerRequest", e.target.value)}
+                          value={row.averageLatency}
+                          onChange={(e) => updateRunRow(row.key, "averageLatency", e.target.value)}
                           onPaste={(e) => handleRunSheetPaste(rowIndex, 5, e)}
                           onFocus={() => {
                             setActiveRunCell({ row: rowIndex, col: 5 });
@@ -2615,8 +3043,8 @@ export default function ProjectPocReviewPage() {
                         onMouseEnter={() => extendRunCellSelection(rowIndex, 6)}
                       >
                         <input
-                          value={row.policyViolationRate}
-                          onChange={(e) => updateRunRow(row.key, "policyViolationRate", e.target.value)}
+                          value={row.costPerRequest}
+                          onChange={(e) => updateRunRow(row.key, "costPerRequest", e.target.value)}
                           onPaste={(e) => handleRunSheetPaste(rowIndex, 6, e)}
                           onFocus={() => {
                             setActiveRunCell({ row: rowIndex, col: 6 });
@@ -2633,8 +3061,8 @@ export default function ProjectPocReviewPage() {
                         onMouseEnter={() => extendRunCellSelection(rowIndex, 7)}
                       >
                         <input
-                          value={row.recall}
-                          onChange={(e) => updateRunRow(row.key, "recall", e.target.value)}
+                          value={row.policyViolationRate}
+                          onChange={(e) => updateRunRow(row.key, "policyViolationRate", e.target.value)}
                           onPaste={(e) => handleRunSheetPaste(rowIndex, 7, e)}
                           onFocus={() => {
                             setActiveRunCell({ row: rowIndex, col: 7 });
@@ -2651,8 +3079,8 @@ export default function ProjectPocReviewPage() {
                         onMouseEnter={() => extendRunCellSelection(rowIndex, 8)}
                       >
                         <input
-                          value={row.precision}
-                          onChange={(e) => updateRunRow(row.key, "precision", e.target.value)}
+                          value={row.recall}
+                          onChange={(e) => updateRunRow(row.key, "recall", e.target.value)}
                           onPaste={(e) => handleRunSheetPaste(rowIndex, 8, e)}
                           onFocus={() => {
                             setActiveRunCell({ row: rowIndex, col: 8 });
@@ -2669,8 +3097,8 @@ export default function ProjectPocReviewPage() {
                         onMouseEnter={() => extendRunCellSelection(rowIndex, 9)}
                       >
                         <input
-                          value={row.f1Score}
-                          onChange={(e) => updateRunRow(row.key, "f1Score", e.target.value)}
+                          value={row.precision}
+                          onChange={(e) => updateRunRow(row.key, "precision", e.target.value)}
                           onPaste={(e) => handleRunSheetPaste(rowIndex, 9, e)}
                           onFocus={() => {
                             setActiveRunCell({ row: rowIndex, col: 9 });
@@ -2680,6 +3108,29 @@ export default function ProjectPocReviewPage() {
                           disabled={runInputDisabled}
                           style={sheetCellInputStyle}
                         />
+                      </td>
+                      <td
+                        style={{ ...tdStyle, ...(isRunCellInSelection(rowIndex, 10) ? sheetCellSelectedStyle : {}), ...(isActiveRunCell(rowIndex, 10) ? sheetCellActiveStyle : {}) }}
+                        onMouseDown={() => startRunCellSelection(rowIndex, 10)}
+                        onMouseEnter={() => extendRunCellSelection(rowIndex, 10)}
+                      >
+                        <input
+                          value={row.f1Score}
+                          onChange={(e) => updateRunRow(row.key, "f1Score", e.target.value)}
+                          onPaste={(e) => handleRunSheetPaste(rowIndex, 10, e)}
+                          onFocus={() => {
+                            setActiveRunCell({ row: rowIndex, col: 10 });
+                            setRunSelectionRange({ start: { row: rowIndex, col: 10 }, end: { row: rowIndex, col: 10 } });
+                          }}
+                          onMouseDown={() => startRunCellSelection(rowIndex, 10)}
+                          disabled={runInputDisabled}
+                          style={sheetCellInputStyle}
+                        />
+                      </td>
+                      <td style={tdStyle}>{row.errorReason || "-"}</td>
+                      <td style={tdStyle}>{typeof row.providerStatus === "number" ? row.providerStatus : "-"}</td>
+                      <td style={{ ...tdStyle, maxWidth: 420, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        {row.errorReasonDetail || "-"}
                       </td>
                     </tr>
                   );
@@ -2803,9 +3254,9 @@ export default function ProjectPocReviewPage() {
             onClick={() => setRightPanelTab("preview")}
             style={{
               ...topPanelTabStyle,
+              border: rightPanelTab === "preview" ? "1px solid #111827" : "1px solid #d1d5db",
               background: rightPanelTab === "preview" ? "#111827" : "#f3f4f6",
               color: rightPanelTab === "preview" ? "#fff" : "#374151",
-              borderColor: rightPanelTab === "preview" ? "#111827" : "#d1d5db",
             }}
           >
             Preview
@@ -2815,9 +3266,9 @@ export default function ProjectPocReviewPage() {
             onClick={() => setRightPanelTab("impact")}
             style={{
               ...topPanelTabStyle,
+              border: rightPanelTab === "impact" ? "1px solid #111827" : "1px solid #d1d5db",
               background: rightPanelTab === "impact" ? "#111827" : "#f3f4f6",
               color: rightPanelTab === "impact" ? "#fff" : "#374151",
-              borderColor: rightPanelTab === "impact" ? "#111827" : "#d1d5db",
             }}
           >
             영향도맵
@@ -2991,7 +3442,9 @@ const viewTabsStyle: CSSProperties = {
 };
 
 const viewTabButtonStyle: CSSProperties = {
-  border: "1px solid #d1d5db",
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: "#d1d5db",
   borderRadius: 999,
   padding: "5px 11px",
   background: "#f9fafb",
@@ -3231,10 +3684,68 @@ const scenarioModelCardStyle: CSSProperties = {
 
 const scenarioModelLineStyle: CSSProperties = {
   fontSize: 11,
-  color: "#334155",
+  color: "#1f2937",
   fontWeight: 600,
   lineHeight: 1.3,
   whiteSpace: "nowrap",
+};
+
+const scenarioModelSelectWrapStyle: CSSProperties = {
+  position: "relative",
+};
+
+const scenarioModelSelectStyle: CSSProperties = {
+  width: "100%",
+  border: "none",
+  borderRadius: 8,
+  background: "transparent",
+  padding: 0,
+  textAlign: "left",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  fontSize: 11,
+  color: "#1f2937",
+  cursor: "pointer",
+};
+
+const scenarioModelSelectCaretStyle: CSSProperties = {
+  fontSize: 11,
+  color: "#64748b",
+};
+
+const scenarioModelSelectMenuStyle: CSSProperties = {
+  position: "absolute",
+  left: 0,
+  right: 0,
+  top: "calc(100% + 6px)",
+  zIndex: 50,
+  border: "1px solid #c5cdd8",
+  borderRadius: 8,
+  background: "#ffffff",
+  boxShadow: "0 12px 24px rgba(15,23,42,0.15)",
+  padding: 6,
+  display: "grid",
+  gap: 2,
+};
+
+const scenarioModelSelectOptionStyle: CSSProperties = {
+  border: "1px solid transparent",
+  background: "transparent",
+  borderRadius: 6,
+  padding: "7px 10px",
+  textAlign: "left",
+  fontSize: 11,
+  color: "#111827",
+  cursor: "pointer",
+};
+
+const scenarioModelSelectOptionActiveStyle: CSSProperties = {
+  background: "#bfdbfe",
+  border: "1px solid #93c5fd",
+  color: "#1d4ed8",
+  fontWeight: 700,
 };
 
 const summaryCardsGridStyle: CSSProperties = {
@@ -3292,4 +3803,34 @@ const summaryTextStyle: CSSProperties = {
 const summaryValueStyle: CSSProperties = {
   color: "#1d4ed8",
   fontWeight: 800,
+};
+
+const rawModelTabsWrapStyle: CSSProperties = {
+  marginTop: 8,
+  display: "flex",
+  gap: 6,
+  flexWrap: "wrap",
+};
+
+const rawReviewActionRowStyle: CSSProperties = {
+  marginTop: 8,
+  display: "flex",
+  justifyContent: "flex-end",
+};
+
+const rawModelTabButtonStyle: CSSProperties = {
+  border: "1px solid #d1d5db",
+  borderRadius: 999,
+  background: "#fff",
+  color: "#475569",
+  fontSize: 12,
+  fontWeight: 700,
+  padding: "6px 10px",
+  cursor: "pointer",
+};
+
+const rawModelTabButtonActiveStyle: CSSProperties = {
+  border: "1px solid #93c5fd",
+  background: "#dbeafe",
+  color: "#1d4ed8",
 };
